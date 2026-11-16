@@ -1,0 +1,416 @@
+//! Affichage tête haute : viseur, vie, munitions, scores, messages,
+//! tableau des scores, menu d'achat et discussion.
+
+use crate::audio::Audio;
+use crate::game::{Game, Overlay, Status};
+use crate::settings::{Action, Crosshair, Settings};
+use crate::ui::{Ui, ACCENT, CT_COLOR, DIM, PANEL, TEXT, T_COLOR, WIDGET, WIDGET_HOT};
+use cesi_common::protocol::*;
+use cesi_common::weapons::*;
+use macroquad::prelude::*;
+
+fn team_color(t: Team) -> Color {
+    if t == Team::T {
+        T_COLOR
+    } else {
+        CT_COLOR
+    }
+}
+
+/// Dessine le viseur au point donné ; `extra` écarte les branches (pixels).
+pub fn draw_crosshair(cx: f32, cy: f32, c: &Crosshair, extra: f32) {
+    let k = (screen_height() / 1080.0).max(0.5);
+    let th = (c.thickness * k).round().max(1.0);
+    let len = (c.size * k).round();
+    let gap = (c.gap * k).round() + extra.round();
+    let col = Color::from_rgba(c.color[0], c.color[1], c.color[2], (c.alpha.clamp(0.0, 1.0) * 255.0) as u8);
+    let (cx, cy) = (cx.round(), cy.round());
+    let h = (th / 2.0).floor();
+    let mut rects: Vec<(f32, f32, f32, f32)> = Vec::new();
+    if len > 0.0 {
+        rects.push((cx + gap, cy - h, len, th));
+        rects.push((cx - gap - len, cy - h, len, th));
+        rects.push((cx - h, cy + gap, th, len));
+        if !c.t_style {
+            rects.push((cx - h, cy - gap - len, th, len));
+        }
+    }
+    if c.dot {
+        rects.push((cx - h, cy - h, th, th));
+    }
+    if c.outline {
+        for (x, y, w, hh) in &rects {
+            draw_rectangle(x - 1.0, y - 1.0, w + 2.0, hh + 2.0, Color::new(0.0, 0.0, 0.0, col.a));
+        }
+    }
+    for (x, y, w, hh) in rects {
+        draw_rectangle(x, y, w, hh, col);
+    }
+}
+
+fn clock(t: f32) -> String {
+    let s = t.max(0.0).ceil() as u32;
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
+impl Game {
+    pub fn draw_hud(&self, st: &Settings, ui: &Ui) {
+        let (w, h) = (screen_width(), screen_height());
+        let k = h / 720.0;
+        if !matches!(self.status, Status::Connected) || self.snap().is_none() {
+            ui.dim(0.5);
+            ui.shadow_px_c("Connexion au serveur…", w / 2.0, h / 2.0, 30.0 * k, TEXT);
+            return;
+        }
+        let snap = self.snap().unwrap();
+        let Some(me) = self.me() else { return };
+        let def = weapon(self.weapon_id());
+
+        // --- Lunette ou viseur ---
+        if me.alive && self.zoom > 0 {
+            let (cx, cy, r) = (w / 2.0, h / 2.0, h * 0.47);
+            draw_rectangle(0.0, 0.0, cx - r, h, BLACK);
+            draw_rectangle(cx + r, 0.0, w - cx - r, h, BLACK);
+            let big = r * 1.55;
+            for i in 0..72 {
+                let (a0, a1) = (i as f32 / 72.0 * std::f32::consts::TAU, (i + 1) as f32 / 72.0 * std::f32::consts::TAU);
+                let (p0, p1) = (vec2(a0.cos(), a0.sin()), vec2(a1.cos(), a1.sin()));
+                let c = vec2(cx, cy);
+                draw_triangle(c + p0 * r, c + p1 * r, c + p1 * big, BLACK);
+                draw_triangle(c + p0 * r, c + p1 * big, c + p0 * big, BLACK);
+            }
+            draw_rectangle(cx - r, cy - k, r * 2.0, 2.0 * k, BLACK);
+            draw_rectangle(cx - k, cy - r, 2.0 * k, r * 2.0, BLACK);
+        } else if me.alive && !def.scope && self.overlay != Overlay::Buy {
+            let extra = if st.crosshair.dynamic {
+                self.spread(def).to_radians().tan() / (self.cam_fovy / 2.0).tan() * h / 2.0
+            } else {
+                0.0
+            };
+            draw_crosshair(w / 2.0, h / 2.0, &st.crosshair, extra);
+        }
+
+        // --- Touche confirmée ---
+        if self.hitmarker_t > 0.0 {
+            let col = if self.hit_kill { Color::new(1.0, 0.25, 0.2, 1.0) } else { WHITE };
+            let (cx, cy) = (w / 2.0, h / 2.0);
+            for (sx, sy) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+                draw_line(cx + sx * 7.0 * k, cy + sy * 7.0 * k, cx + sx * 15.0 * k, cy + sy * 15.0 * k, 2.0 * k, col);
+            }
+        }
+
+        // --- Dégâts reçus et explosion ---
+        if self.hurt_t > 0.0 {
+            let a = (self.hurt_t / 0.6).min(1.0) * 0.45;
+            let t = 70.0 * k;
+            let red = Color::new(0.8, 0.0, 0.0, a);
+            draw_rectangle(0.0, 0.0, w, t, red);
+            draw_rectangle(0.0, h - t, w, t, red);
+            draw_rectangle(0.0, t, t, h - 2.0 * t, red);
+            draw_rectangle(w - t, t, t, h - 2.0 * t, red);
+        }
+        if self.flash_t > 0.0 {
+            draw_rectangle(0.0, 0.0, w, h, Color::new(1.0, 0.95, 0.85, self.flash_t.min(1.0)));
+        }
+
+        // --- Bandeau du haut : scores et chrono ---
+        let planted = matches!(snap.bomb, BombState::Planted { .. });
+        draw_rectangle(w / 2.0 - 150.0 * k, 0.0, 300.0 * k, 52.0 * k, Color::new(0.0, 0.0, 0.0, 0.45));
+        let (timer, tcol) = match snap.phase {
+            Phase::Live if planted => ("BOMBE".to_string(), if (self.now * 3.0) as i64 % 2 == 0 { Color::new(1.0, 0.3, 0.2, 1.0) } else { TEXT }),
+            Phase::Freeze => (clock(snap.time_left), Color::new(1.0, 0.85, 0.3, 1.0)),
+            Phase::Live => (clock(snap.time_left), if snap.time_left < 10.0 { Color::new(1.0, 0.3, 0.2, 1.0) } else { TEXT }),
+            _ => ("—".to_string(), DIM),
+        };
+        ui.shadow_px_c(&timer, w / 2.0, 34.0 * k, 28.0 * k, tcol);
+        ui.shadow_px_c(&snap.score_t.to_string(), w / 2.0 - 100.0 * k, 32.0 * k, 30.0 * k, T_COLOR);
+        ui.shadow_px_c(&snap.score_ct.to_string(), w / 2.0 + 100.0 * k, 32.0 * k, 30.0 * k, CT_COLOR);
+        let alive = |t: Team| snap.players.iter().filter(|p| p.team == t && p.alive).count();
+        ui.shadow_px_c(&format!("{} en vie", alive(Team::T)), w / 2.0 - 100.0 * k, 47.0 * k, 12.0 * k, T_COLOR);
+        ui.shadow_px_c(&format!("{} en vie", alive(Team::CT)), w / 2.0 + 100.0 * k, 47.0 * k, 12.0 * k, CT_COLOR);
+
+        // --- Éliminations ---
+        let mut y = 76.0 * k;
+        for l in self.killfeed.iter().filter(|l| self.now - l.time < 7.0) {
+            let mid = format!(" [{}{}] ", weapon(l.weapon).name, if l.headshot { " · tête" } else { "" });
+            let size = 16.0 * k;
+            let (wk, wm, wv) = (ui.width_px(&l.killer, size), ui.width_px(&mid, size), ui.width_px(&l.victim, size));
+            let x = w - 16.0 * k - (wk + wm + wv);
+            draw_rectangle(x - 8.0 * k, y - 17.0 * k, wk + wm + wv + 16.0 * k, 24.0 * k, Color::new(0.0, 0.0, 0.0, if l.mine { 0.7 } else { 0.4 }));
+            if l.mine {
+                draw_rectangle_lines(x - 8.0 * k, y - 17.0 * k, wk + wm + wv + 16.0 * k, 24.0 * k, 2.0, Color::new(0.9, 0.2, 0.2, 0.9));
+            }
+            ui.text_px(&l.killer, x, y, size, l.kteam.map_or(TEXT, team_color));
+            ui.text_px(&mid, x + wk, y, size, TEXT);
+            ui.text_px(&l.victim, x + wk + wm, y, size, team_color(l.vteam));
+            y += 28.0 * k;
+        }
+
+        // --- Discussion ---
+        let mut y = h - 150.0 * k;
+        let chatting = self.overlay == Overlay::Chat;
+        for (from, team, text, t) in self.chat.iter().rev() {
+            if !chatting && self.now - t > 9.0 {
+                continue;
+            }
+            if from.is_empty() {
+                ui.shadow_px(text, 22.0 * k, y, 16.0 * k, Color::new(1.0, 0.9, 0.5, 1.0));
+            } else {
+                let name = format!("{} : ", from);
+                ui.shadow_px(&name, 22.0 * k, y, 16.0 * k, team.map_or(TEXT, team_color));
+                ui.shadow_px(text, 22.0 * k + ui.width_px(&name, 16.0 * k), y, 16.0 * k, TEXT);
+            }
+            y -= 22.0 * k;
+        }
+
+        // --- Message central ---
+        if let Some((text, until, color)) = &self.center {
+            if self.now < *until {
+                let wt = ui.width_px(text, 30.0 * k);
+                draw_rectangle(w / 2.0 - wt / 2.0 - 20.0 * k, h * 0.2 - 34.0 * k, wt + 40.0 * k, 50.0 * k, Color::new(0.0, 0.0, 0.0, 0.5));
+                ui.shadow_px_c(text, w / 2.0, h * 0.2, 30.0 * k, *color);
+            }
+        }
+
+        if me.alive {
+            // --- Vie, gilet, argent ---
+            let hp_col = if me.health <= 25 { Color::new(1.0, 0.3, 0.25, 1.0) } else { TEXT };
+            ui.shadow_px("VIE", 24.0 * k, h - 62.0 * k, 13.0 * k, DIM);
+            ui.shadow_px(&me.health.to_string(), 24.0 * k, h - 22.0 * k, 42.0 * k, hp_col);
+            ui.shadow_px(if me.helmet { "GILET + CASQUE" } else { "GILET" }, 130.0 * k, h - 62.0 * k, 13.0 * k, DIM);
+            ui.shadow_px(&me.armor.to_string(), 130.0 * k, h - 22.0 * k, 42.0 * k, if me.armor > 0 { TEXT } else { DIM });
+            ui.shadow_px(&format!("{} $", me.money), 24.0 * k, h - 92.0 * k, 24.0 * k, Color::new(0.55, 0.9, 0.45, 1.0));
+            let mut x = 150.0 * k;
+            if self.has_bomb() {
+                ui.shadow_px("BOMBE", x, h - 92.0 * k, 18.0 * k, Color::new(1.0, 0.5, 0.25, 1.0));
+                x += 80.0 * k;
+            }
+            if me.kit {
+                ui.shadow_px("KIT", x, h - 92.0 * k, 18.0 * k, CT_COLOR);
+            }
+
+            // --- Arme et munitions ---
+            let right = w - 24.0 * k;
+            if self.slot < 2 {
+                let a = self.ammo[self.slot];
+                let res = format!(" / {}", a.reserve);
+                let wr = ui.width_px(&res, 22.0 * k);
+                ui.shadow_px(&res, right - wr, h - 22.0 * k, 22.0 * k, DIM);
+                let col = if a.mag as f32 <= def.mag as f32 * 0.25 { Color::new(1.0, 0.3, 0.25, 1.0) } else { TEXT };
+                ui.shadow_px_r(&a.mag.to_string(), right - wr, h - 22.0 * k, 42.0 * k, col);
+            }
+            if self.reload_t > 0.0 {
+                ui.shadow_px_r("Rechargement…", right, h - 66.0 * k, 16.0 * k, ACCENT);
+            }
+            let slots = [(0usize, st.bind(Action::Primary)), (1, st.bind(Action::Secondary)), (2, st.bind(Action::Knife))];
+            let mut y = h - 96.0 * k;
+            for (s, bind) in slots.iter().rev() {
+                let id = if *s < 2 { self.ammo[*s].id } else { KNIFE };
+                if *s < 2 && id == 0 {
+                    continue;
+                }
+                let text = format!("{}   [{}]", weapon(id).name, bind.label());
+                ui.shadow_px_r(&text, right, y, 16.0 * k, if *s == self.slot { TEXT } else { DIM });
+                y -= 22.0 * k;
+            }
+
+            // --- Indications contextuelles ---
+            let use_key = st.bind(Action::Use).label();
+            let mut hint: Option<String> = None;
+            if me.action == 1 || me.action == 2 {
+                let label = if me.action == 1 { "Pose de la bombe…" } else { "Désamorçage…" };
+                let (bw, bh) = (280.0 * k, 12.0 * k);
+                ui.shadow_px_c(label, w / 2.0, h * 0.62 - 10.0 * k, 18.0 * k, TEXT);
+                draw_rectangle(w / 2.0 - bw / 2.0, h * 0.62, bw, bh, Color::new(0.0, 0.0, 0.0, 0.6));
+                draw_rectangle(w / 2.0 - bw / 2.0, h * 0.62, bw * me.progress.clamp(0.0, 1.0), bh, ACCENT);
+            } else if self.has_bomb() && self.info.site_of(self.body.pos).is_some() && snap.phase == Phase::Live {
+                hint = Some(format!("Maintenez [{}] pour poser la bombe", use_key));
+            } else if me.team == Team::CT && matches!(snap.bomb, BombState::Planted { pos, .. } if pos.distance(self.body.pos) < 1.8) {
+                hint = Some(format!("Maintenez [{}] pour désamorcer", use_key));
+            } else if self.can_buy() && self.overlay == Overlay::None {
+                hint = Some(format!("[{}] Acheter des armes", st.bind(Action::Buy).label()));
+            }
+            if let Some(t) = hint {
+                ui.shadow_px_c(&t, w / 2.0, h * 0.66, 18.0 * k, Color::new(1.0, 0.9, 0.5, 1.0));
+            }
+        } else {
+            let who = self.spectate.and_then(|s| self.player(s)).map(|p| p.name.clone());
+            let text = match who {
+                Some(n) => format!("Vous êtes éliminé — caméra : {} (clic pour changer)", n),
+                None => "Vous êtes éliminé".to_string(),
+            };
+            ui.shadow_px_c(&text, w / 2.0, h * 0.86, 20.0 * k, TEXT);
+        }
+
+        if st.down(Action::Scoreboard) || snap.phase == Phase::MatchEnd || self.debug & 2 != 0 {
+            self.draw_scoreboard(ui);
+        }
+    }
+
+    fn draw_scoreboard(&self, ui: &Ui) {
+        let Some(snap) = self.snap() else { return };
+        let my_team = self.me().map(|m| m.team);
+        let panel = Rect::new(240.0, 90.0, 800.0, 540.0);
+        ui.rect(panel, PANEL);
+        ui.text_c(&self.cfg.server_name, 640.0, 128.0, 22.0, DIM);
+        ui.text_c(
+            &format!("Round {} / {}", snap.round, self.cfg.max_rounds),
+            640.0,
+            154.0,
+            16.0,
+            DIM,
+        );
+        let mut y = 190.0;
+        for team in [Team::CT, Team::T] {
+            let col = team_color(team);
+            let score = if team == Team::T { snap.score_t } else { snap.score_ct };
+            ui.rect(Rect::new(panel.x + 20.0, y - 22.0, panel.w - 40.0, 30.0), Color::new(col.r, col.g, col.b, 0.18));
+            ui.text(&format!("{} — {}", team.label(), score), panel.x + 32.0, y, 20.0, col);
+            ui.text_r("Élim.", 800.0, y, 14.0, DIM);
+            ui.text_r("Morts", 880.0, y, 14.0, DIM);
+            ui.text_r("Argent", 1000.0, y, 14.0, DIM);
+            y += 30.0;
+            let mut list: Vec<&PlayerSnap> = snap.players.iter().filter(|p| p.team == team).collect();
+            list.sort_by(|a, b| b.kills.cmp(&a.kills).then(a.deaths.cmp(&b.deaths)));
+            for p in list {
+                let c = if !p.alive {
+                    DIM
+                } else if Some(p.id) == self.my_id {
+                    ACCENT
+                } else {
+                    TEXT
+                };
+                ui.text(&p.name, panel.x + 32.0, y, 18.0, c);
+                if !p.alive {
+                    ui.text("éliminé", panel.x + 300.0, y, 14.0, DIM);
+                }
+                ui.text_r(&p.kills.to_string(), 800.0, y, 18.0, c);
+                ui.text_r(&p.deaths.to_string(), 880.0, y, 18.0, c);
+                if Some(team) == my_team {
+                    ui.text_r(&format!("{} $", p.money), 1000.0, y, 18.0, c);
+                }
+                y += 26.0;
+            }
+            y += 26.0;
+        }
+    }
+
+    /// Menu d'achat ; les achats sont validés par le serveur.
+    pub fn draw_buy(&mut self, ui: &mut Ui, st: &Settings, audio: &Audio) {
+        let Some(me) = self.me().cloned() else { return };
+        ui.dim(0.35);
+        let panel = Rect::new(130.0, 60.0, 1020.0, 600.0);
+        ui.rect(panel, PANEL);
+        ui.text("ACHATS", 160.0, 108.0, 32.0, TEXT);
+        ui.text_r(&format!("{} $", me.money), 1120.0, 108.0, 30.0, Color::new(0.55, 0.9, 0.45, 1.0));
+        if let Some(s) = self.snap() {
+            let left = match s.phase {
+                Phase::Freeze => s.time_left + self.cfg.buy_time,
+                _ => s.time_left - (self.cfg.round_time - self.cfg.buy_time),
+            };
+            ui.text_c(&format!("Fermeture des achats dans {} s", left.max(0.0).ceil()), 640.0, 106.0, 16.0, DIM);
+        }
+
+        let groups: [(Class, f32, f32); 5] = [
+            (Class::Pistol, 160.0, 150.0),
+            (Class::Smg, 490.0, 150.0),
+            (Class::Rifle, 820.0, 150.0),
+            (Class::Lmg, 490.0, 360.0),
+            (Class::Sniper, 820.0, 360.0),
+        ];
+        let mut info: Option<String> = None;
+        let mut order: Option<BuyItem> = None;
+        let row = |ui: &mut Ui, x: f32, y: f32, name: &str, price: u32, owned: bool| -> (bool, bool) {
+            let r = Rect::new(x, y, 300.0, 38.0);
+            let afford = me.money >= price && !owned;
+            let hot = ui.hover(r);
+            ui.rect(r, if hot && afford { WIDGET_HOT } else { WIDGET });
+            if hot && afford {
+                ui.rect(Rect::new(r.x, r.y, 4.0, r.h), ACCENT);
+            }
+            ui.text(name, x + 14.0, y + 26.0, 19.0, if afford { TEXT } else { DIM });
+            if owned {
+                ui.text_r("possédé", x + 288.0, y + 26.0, 15.0, DIM);
+            } else {
+                let col = if afford { Color::new(0.55, 0.9, 0.45, 1.0) } else { Color::new(0.8, 0.35, 0.3, 1.0) };
+                ui.text_r(&format!("{} $", price), x + 288.0, y + 26.0, 18.0, col);
+            }
+            (hot && afford && ui.click, hot)
+        };
+        for (class, x, y0) in groups {
+            ui.text(class.label(), x, y0 + 16.0, 17.0, ACCENT);
+            let mut y = y0 + 28.0;
+            for d in WEAPONS.iter().filter(|d| d.class == class) {
+                let owned = me.primary == d.id || me.secondary == d.id;
+                let (click, hot) = row(ui, x, y, d.name, d.price, owned);
+                if click {
+                    order = Some(BuyItem::Weapon(d.id));
+                }
+                if hot {
+                    info = Some(format!(
+                        "{} — dégâts {:.0} · cadence {:.0}/min · chargeur {} · pénétration du gilet {:.0} % · prime {} $",
+                        d.name,
+                        d.damage,
+                        d.rpm,
+                        d.mag,
+                        d.armor_pen * 100.0,
+                        d.kill_reward
+                    ));
+                }
+                y += 44.0;
+            }
+        }
+        // Équipement
+        ui.text("Équipement", 160.0, 376.0, 17.0, ACCENT);
+        let full = me.armor >= 100;
+        let gear: [(&str, u32, bool, BuyItem, &str); 3] = [
+            ("Gilet pare-balles", PRICE_KEVLAR, full, BuyItem::Kevlar, "Gilet pare-balles — réduit les dégâts au corps"),
+            (
+                "Gilet + casque",
+                if full { PRICE_HELMET_ONLY } else { PRICE_KEVLAR_HELMET },
+                full && me.helmet,
+                BuyItem::KevlarHelmet,
+                "Gilet + casque — protège aussi des tirs à la tête",
+            ),
+            ("Kit de désamorçage", PRICE_KIT, me.kit || me.team != Team::CT, BuyItem::Kit, "Kit de désamorçage — désamorce en 5 s au lieu de 10 (Défenseurs)"),
+        ];
+        let mut y = 388.0;
+        for (name, price, owned, item, text) in gear {
+            let (click, hot) = row(ui, 160.0, y, name, price, owned);
+            if click {
+                order = Some(item);
+            }
+            if hot {
+                info = Some(text.to_string());
+            }
+            y += 44.0;
+        }
+        if let Some(t) = info {
+            ui.text(&t, 160.0, 590.0, 16.0, TEXT);
+        }
+        ui.text(&format!("[{}] ou [Échap] pour fermer", st.bind(Action::Buy).label()), 160.0, 636.0, 15.0, DIM);
+        if let Some(item) = order {
+            self.buy(item, audio);
+        }
+        if st.pressed(Action::Buy) && self.overlay_since < self.now {
+            self.overlay = Overlay::None;
+        }
+    }
+
+    /// Ligne de saisie de la discussion.
+    pub fn draw_chat_input(&mut self, ui: &mut Ui) {
+        let r = Rect::new(20.0, 596.0, 460.0, 36.0);
+        ui.focus = Some(900);
+        ui.textfield(900, r, &mut self.chat_input, 100);
+        ui.text("Entrée pour envoyer, Échap pour annuler", 22.0, 652.0, 14.0, DIM);
+        if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+            let text = self.chat_input.trim().to_string();
+            if !text.is_empty() {
+                self.net.reliable(ClientMsg::Chat(text));
+            }
+            self.chat_input.clear();
+            self.overlay = Overlay::None;
+            ui.focus = None;
+        }
+    }
+}

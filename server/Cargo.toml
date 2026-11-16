@@ -1,0 +1,17 @@
+[package]
+name = "cesi_server"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "cesi_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cesi_go_server"
+path = "src/main.rs"
+
+[dependencies]
+cesi_common = { path = "../common" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
