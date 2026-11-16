@@ -215,3 +215,43 @@ impl Nav {
         Some(out)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cesi_common::map;
+
+    /// Sur chaque carte, les deux sites doivent être accessibles depuis les deux départs.
+    /// `cargo test -p cesi_server -- --nocapture` affiche la longueur des trajets.
+    #[test]
+    fn sites_reachable_from_spawns() {
+        for id in 0..map::MAPS.len() as u8 {
+            let (w, info) = map::build(id);
+            let nav = Nav::build(&w, info.t_spawns[0].0);
+            let mut rng = Rng::new(7);
+            for (who, spawns) in [("attaquants", &info.t_spawns), ("défenseurs", &info.ct_spawns)] {
+                for (s, (min, max)) in info.sites.iter().enumerate() {
+                    let mut total = 0.0;
+                    let mut trace = String::new();
+                    for k in 0..8 {
+                        let from = spawns[k % spawns.len()].0;
+                        let to = nav.random_in(*min, *max, &mut rng).expect("point dans le site");
+                        let path = nav.path(from, to).unwrap_or_else(|| panic!("{} : site {} inaccessible", info.name, s));
+                        total += path.windows(2).map(|p| p[0].distance(p[1])).sum::<f32>();
+                        if k == 0 {
+                            let mut last = (-1, -1);
+                            for p in &path {
+                                let t = ((p.x / 4.0) as i32, 15 - (p.z / 4.0) as i32);
+                                if t != last {
+                                    trace += &format!("{},{} ", t.0, t.1);
+                                    last = t;
+                                }
+                            }
+                        }
+                    }
+                    println!("{:<10} {:<11} -> site {} : {:>3.0} m   (colonne,ligne) {}", info.name, who, ["A", "B"][s], total / 8.0, trace);
+                }
+            }
+        }
+    }
+}

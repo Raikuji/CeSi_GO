@@ -37,6 +37,8 @@ pub struct ServerConfig {
     /// Nom affiché aux joueurs.
     pub name: String,
     pub port: u16,
+    /// Carte jouée : nom ou numéro (voir la commande `map`).
+    pub map: String,
     /// Nombre maximal de joueurs humains.
     pub max_players: u8,
     /// Joueurs par équipe (les bots complètent).
@@ -66,6 +68,7 @@ impl Default for ServerConfig {
         ServerConfig {
             name: "Serveur CeSi GO".into(),
             port: DEFAULT_PORT,
+            map: map::MAPS[0].name.into(),
             max_players: 10,
             team_size: 5,
             fill_bots: true,
@@ -263,8 +266,14 @@ impl Server {
         let host = if cfg.local_only { "127.0.0.1" } else { "0.0.0.0" };
         let socket = UdpSocket::bind((host, cfg.port)).map_err(|e| format!("Impossible d'ouvrir le port {} : {}", cfg.port, e))?;
         socket.set_nonblocking(true).map_err(|e| e.to_string())?;
-        let (world, info) = map::build();
+        let id = map::find(&cfg.map).unwrap_or_else(|| {
+            log(&format!("Carte « {} » inconnue : {} utilisée à la place", cfg.map, map::MAPS[0].name));
+            0
+        });
+        let (world, info) = map::build(id);
         let nav = Nav::build(&world, info.t_spawns[0].0);
+        let mut cfg = cfg;
+        cfg.map = info.name.into();
         Ok(Server {
             cfg,
             cfg_path,
@@ -294,6 +303,10 @@ impl Server {
             areas: Vec::new(),
             next_nade: 0,
         })
+    }
+
+    pub fn map_name(&self) -> &'static str {
+        self.info.name
     }
 
     pub fn port(&self) -> u16 {
@@ -418,6 +431,7 @@ impl Server {
             id: pid,
             cfg: MatchCfg {
                 server_name: self.cfg.name.clone(),
+                map: self.info.id,
                 freeze_time: self.cfg.freeze_time,
                 buy_time: self.cfg.buy_time,
                 round_time: self.cfg.round_time,
@@ -694,6 +708,32 @@ impl Server {
         self.start_round();
     }
 
+    /// Charge une autre carte et relance le match dessus.
+    fn change_map(&mut self, id: u8) {
+        let (world, info) = map::build(id);
+        self.nav = Nav::build(&world, info.t_spawns[0].0);
+        self.world = world;
+        self.info = info;
+        self.cfg.map = self.info.name.into();
+        self.bomb = BombState::None;
+        self.nades.clear();
+        self.areas.clear();
+        for p in &mut self.players {
+            p.history.clear();
+            if let Some(b) = p.bot.as_mut() {
+                b.forget();
+            }
+        }
+        self.broadcast(ServerMsg::MapChange { map: id });
+        self.chat_all(None, format!("[Serveur] Changement de carte : {}", self.info.name));
+        self.say(&format!("Carte : {}", self.info.name));
+        if self.conns.is_empty() && !self.cfg.run_empty {
+            self.phase = Phase::Warmup;
+        } else {
+            self.start_match();
+        }
+    }
+
     fn equip_fresh(&mut self, i: usize) {
         let p = &mut self.players[i];
         p.primary = 0;
@@ -773,6 +813,9 @@ impl Server {
             "Round {} — Attaquants {} : {} Défenseurs",
             self.round, self.score_t, self.score_ct
         ));
+        if self.cfg.fast {
+            self.say(&format!("  site visé {}", if self.t_site == 0 { "A" } else { "B" }));
+        }
     }
 
     fn end_round(&mut self, winner: Team, reason: EndReason) {
@@ -1277,6 +1320,13 @@ impl Server {
                 if headshot { ", tir à la tête" } else { "" }
             );
             self.say(&msg);
+            if self.cfg.fast {
+                let (team, kp) = (self.players[victim].team, self.players[a].pos);
+                self.say(&format!(
+                    "  mort {:?} {:.1} {:.1} tueur {:.1} {:.1} t={:.1}",
+                    team, vpos.x, vpos.z, kp.x, kp.z, self.round_elapsed
+                ));
+            }
         } else {
             self.say(&format!("{} est mort dans l'explosion", vname));
         }
@@ -1314,6 +1364,7 @@ impl Server {
                 out!("  say <message>          envoie un message à tous les joueurs");
                 out!("  kick <id|nom>          expulse un joueur");
                 out!("  bots <on|off>          active ou désactive les bots");
+                out!("  map [nom|numéro]       liste les cartes ou change de carte (relance le match)");
                 out!("  teamsize <n>           joueurs par équipe (bots compris)");
                 out!("  difficulty <0-100>     niveau des bots");
                 out!("  money <id|nom|all> <n> donne de l'argent");
@@ -1399,6 +1450,21 @@ impl Server {
                     self.balance_bots();
                 }
                 out!(if self.cfg.fill_bots { "Bots activés" } else { "Bots désactivés" });
+            }
+            "map" | "carte" => {
+                if rest.is_empty() {
+                    out!("Cartes disponibles (« map <nom ou numéro> » pour en changer) :");
+                    for (i, m) in map::MAPS.iter().enumerate() {
+                        let mark = if i as u8 == self.info.id { "*" } else { " " };
+                        out!(&format!(" {} {}  {:<10} {}", mark, i + 1, m.name, m.desc));
+                    }
+                } else {
+                    match map::find(rest) {
+                        Some(id) if id == self.info.id => out!(&format!("La carte {} est déjà en cours", self.info.name)),
+                        Some(id) => self.change_map(id),
+                        None => out!("Carte inconnue — tapez « map » pour la liste"),
+                    }
+                }
             }
             "teamsize" => match rest.parse::<u8>() {
                 Ok(n) if (1..=8).contains(&n) => {

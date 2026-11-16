@@ -226,6 +226,13 @@ impl WorldRender {
             },
         )
         .expect("compilation du shader");
+        let mut wr = WorldRender { regions: Vec::new(), material };
+        wr.set_world(world);
+        wr
+    }
+
+    /// Remaille le monde (au chargement d'une autre carte).
+    pub fn set_world(&mut self, world: &World) {
         let mut regions = Vec::new();
         let half_h = world.sy as f32 * VS / 2.0;
         for cz in (0..world.sz).step_by(CHUNK as usize) {
@@ -243,7 +250,7 @@ impl WorldRender {
                 }
             }
         }
-        WorldRender { regions, material }
+        self.regions = regions;
     }
 
     /// Active le shader du monde pour la caméra donnée.

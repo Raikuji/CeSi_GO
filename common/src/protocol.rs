@@ -3,7 +3,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL: u16 = 4;
+pub const PROTOCOL: u16 = 5;
 pub const DEFAULT_PORT: u16 = 27500;
 pub const TICK_RATE: u32 = 60;
 
@@ -75,6 +75,8 @@ pub enum BuyItem {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct MatchCfg {
     pub server_name: String,
+    /// Carte jouée (indice dans `map::MAPS`).
+    pub map: u8,
     pub freeze_time: f32,
     pub buy_time: f32,
     pub round_time: f32,
@@ -137,6 +139,8 @@ pub enum ServerMsg {
     /// Le joueur est aveuglé pendant `duration` secondes.
     Flashed { duration: f32 },
     MatchEnd { winner: Option<Team> },
+    /// Le serveur change de carte : le client la reconstruit.
+    MapChange { map: u8 },
     Chat { from: String, team: Option<Team>, text: String },
 }
 

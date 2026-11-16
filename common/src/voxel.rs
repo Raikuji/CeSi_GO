@@ -21,8 +21,14 @@ pub const YELLOW: u8 = 13;
 pub const GREEN: u8 = 14;
 pub const DARKWOOD: u8 = 15;
 pub const WHITE: u8 = 16;
+pub const METAL: u8 = 17;
+pub const RUST: u8 = 18;
+pub const SNOW: u8 = 19;
+pub const ICE: u8 = 20;
+pub const DARKSTONE: u8 = 21;
+pub const PINE: u8 = 22;
 
-const PALETTE: [[u8; 3]; 17] = [
+const PALETTE: [[u8; 3]; 23] = [
     [0, 0, 0],
     [214, 190, 142],
     [98, 98, 104],
@@ -40,6 +46,12 @@ const PALETTE: [[u8; 3]; 17] = [
     [72, 124, 84],
     [112, 78, 42],
     [236, 236, 236],
+    [138, 148, 160],
+    [176, 84, 54],
+    [224, 231, 240],
+    [150, 196, 222],
+    [72, 74, 86],
+    [46, 92, 62],
 ];
 
 pub fn block_color(b: u8) -> [u8; 3] {

@@ -13,7 +13,8 @@ mod ui;
 mod viewmodel;
 
 use audio::Audio;
-use cesi_common::map;
+use cesi_common::map::{self, MAPS};
+use cesi_common::voxel::{World, VS};
 use cesi_common::protocol::ClientMsg;
 use cesi_server::{Server, ServerConfig};
 use game::{Game, Overlay, Status};
@@ -67,6 +68,7 @@ fn start_local(s: &Settings) -> Result<(LocalServer, String), String> {
         team_size: s.bot_team_size.round().clamp(1.0, 5.0) as u8,
         bot_skill: (s.bot_skill / 100.0).clamp(0.0, 1.0),
         max_rounds: 16,
+        map: MAPS[s.map as usize % MAPS.len()].name.into(),
         ..Default::default()
     };
     let mut server = Server::bind(cfg, None, Box::new(|_| {}))?;
@@ -78,17 +80,23 @@ fn start_local(s: &Settings) -> Result<(LocalServer, String), String> {
     Ok((LocalServer { stop, thread: Some(thread), _cmds: tx }, addr))
 }
 
-/// Vue aérienne tournante de la carte derrière les menus.
-fn backdrop(wr: &WorldRender, t: f32) {
+/// Dessine la carte seule depuis un point de vue donné.
+fn view(wr: &WorldRender, eye: Vec3, target: Vec3) {
     clear_background(render::SKY);
-    let centre = vec3(32.0, 3.0, 34.0);
-    let eye = centre + vec3((t * 0.06).cos() * 40.0, 24.0, (t * 0.06).sin() * 40.0);
     let fovy = 0.9;
-    set_camera(&Camera3D { position: eye, target: centre, up: Vec3::Y, fovy, z_near: 0.1, z_far: 400.0, ..Default::default() });
+    let dir = (target - eye).normalize();
+    let up = if dir.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
+    set_camera(&Camera3D { position: eye, target, up, fovy, z_near: 0.1, z_far: 400.0, ..Default::default() });
     wr.begin(eye);
-    wr.draw(eye, (centre - eye).normalize(), fovy);
+    wr.draw(eye, dir, fovy);
     set_default_camera();
     gl_use_default_material();
+}
+
+/// Vue aérienne tournante de la carte derrière les menus.
+fn backdrop(wr: &WorldRender, world: &World, t: f32) {
+    let centre = vec3(world.sx as f32 * VS / 2.0, 3.0, world.sz as f32 * VS / 2.0 + 2.0);
+    view(wr, centre + vec3((t * 0.06).cos() * 40.0, 24.0, (t * 0.06).sin() * 40.0), centre);
 }
 
 #[macroquad::main(window_conf)]
@@ -102,15 +110,27 @@ async fn main() {
         .map(|i| (args[i + 1].clone(), args[i + 2].clone()));
 
     let mut settings = Settings::load();
+    // Diagnostic : --map <n> force la carte, --cam x,y,z,cx,cy,cz fixe la vue de « --shot vue ».
+    if let Some(m) = args.iter().position(|a| a == "--map").and_then(|i| args.get(i + 1)).and_then(|a| map::find(a)) {
+        settings.map = m;
+    }
+    let cam: Option<Vec<f32>> = args
+        .iter()
+        .position(|a| a == "--cam")
+        .and_then(|i| args.get(i + 1))
+        .map(|a| a.split(',').filter_map(|v| v.parse().ok()).collect())
+        .filter(|v: &Vec<f32>| v.len() == 6);
+    // Les captures ne doivent pas modifier les réglages du joueur.
+    let persist = shot.is_none();
     let mut ui = Ui::new();
     clear_background(Color::new(0.06, 0.07, 0.09, 1.0));
     ui.begin();
     ui.text_c("Chargement…", 640.0, 370.0, 30.0, ui::TEXT);
     next_frame().await;
 
-    let (world, info) = map::build();
-    let (world, info) = (Rc::new(world), Rc::new(info));
-    let wr = WorldRender::new(&world);
+    let (world, info) = map::build(settings.map);
+    let (mut world, mut info) = (Rc::new(world), Rc::new(info));
+    let mut wr = WorldRender::new(&world);
     let mut batch = Batch::new();
     let mut audio = Audio::new().await;
     if settings.fullscreen {
@@ -141,7 +161,9 @@ async fn main() {
                     g.overlay = match g.overlay {
                         Overlay::None => Overlay::Pause,
                         Overlay::Settings => {
-                            settings.save();
+                            if persist {
+                                settings.save();
+                            }
                             Overlay::Pause
                         }
                         _ => Overlay::None,
@@ -160,6 +182,13 @@ async fn main() {
                 g.grab_frames += 1;
             }
             g.update(dt, &settings, &audio);
+            if g.map_dirty {
+                // Le serveur joue une autre carte que celle en mémoire.
+                g.map_dirty = false;
+                world = g.world.clone();
+                info = g.info.clone();
+                wr.set_world(&world);
+            }
             g.draw_world(&wr, &mut batch);
             g.draw_hud(&settings, &ui);
             match g.overlay {
@@ -187,21 +216,32 @@ async fn main() {
                 leave = Some(Some(e.clone()));
             }
         } else {
-            backdrop(&wr, get_time() as f32);
-            ui.dim(0.6);
-            if esc {
-                if menu.rebinding.is_some() {
-                    menu.rebinding = None;
-                } else if menu.screen != Screen::Main {
-                    menu.screen = Screen::Main;
-                    settings.save();
-                }
+            if settings.map != info.id {
+                // Carte choisie dans le menu (ou retour d'un serveur qui en jouait une autre).
+                let (w, i) = map::build(settings.map);
+                world = Rc::new(w);
+                info = Rc::new(i);
+                wr.set_world(&world);
             }
-            match menu::main_menu(&mut ui, &mut menu, &mut settings) {
-                MenuAction::PlayLocal => start = Some(true),
-                MenuAction::Join => start = Some(false),
-                MenuAction::Quit => break,
-                MenuAction::None => {}
+            if let (Some(c), Some(("vue", _))) = (&cam, shot.as_ref().map(|(m, f)| (m.as_str(), f))) {
+                view(&wr, vec3(c[0], c[1], c[2]), vec3(c[3], c[4], c[5]));
+            } else {
+                backdrop(&wr, &world, get_time() as f32);
+                ui.dim(0.6);
+                if esc {
+                    if menu.rebinding.is_some() {
+                        menu.rebinding = None;
+                    } else if menu.screen != Screen::Main {
+                        menu.screen = Screen::Main;
+                        settings.save();
+                    }
+                }
+                match menu::main_menu(&mut ui, &mut menu, &mut settings) {
+                    MenuAction::PlayLocal => start = Some(true),
+                    MenuAction::Join => start = Some(false),
+                    MenuAction::Quit => break,
+                    MenuAction::None => {}
+                }
             }
         }
 
@@ -254,7 +294,9 @@ async fn main() {
         }
 
         if let Some(local) = start {
-            settings.save();
+            if persist {
+                settings.save();
+            }
             let result = if local {
                 start_local(&settings).map(|(srv, addr)| {
                     server = Some(srv);
@@ -298,5 +340,7 @@ async fn main() {
         g.leave();
     }
     drop(server);
-    settings.save();
+    if persist {
+        settings.save();
+    }
 }

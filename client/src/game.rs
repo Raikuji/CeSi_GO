@@ -8,7 +8,7 @@ use crate::viewmodel::{self, ViewAnim};
 use crate::settings::{Action, Settings};
 use crate::ui;
 use cesi_common::grenades::*;
-use cesi_common::map::MapInfo;
+use cesi_common::map::{self, MapInfo};
 use cesi_common::physics::{self, eye_height, Body, MoveInput, BASE_SPEED};
 use cesi_common::protocol::*;
 use cesi_common::voxel::{block_color, World};
@@ -161,6 +161,8 @@ pub struct Game {
     pub fire_snd: f64,
     pub debug_nade: Option<u8>,
     pub debug_bought: bool,
+    /// La carte vient de changer : le rendu du monde doit être refait.
+    pub map_dirty: bool,
     pub rng: Rng,
 }
 
@@ -247,6 +249,7 @@ impl Game {
             fire_snd: 0.0,
             debug_nade: None,
             debug_bought: false,
+            map_dirty: false,
             rng: Rng::from_time(),
         })
     }
@@ -409,9 +412,25 @@ impl Game {
         self.burst(end - dir * 0.05, -dir, 5, 2.4, 0.05, Color::from_rgba(c[0], c[1], c[2], 255));
     }
 
+    /// Charge la carte annoncée par le serveur si ce n'est pas celle déjà en mémoire.
+    fn set_map(&mut self, id: u8) {
+        if id == self.info.id {
+            return;
+        }
+        let (world, info) = map::build(id);
+        self.world = Rc::new(world);
+        self.info = Rc::new(info);
+        self.map_dirty = true;
+        self.particles.clear();
+        self.tracers.clear();
+        self.corpses.clear();
+        self.nade_views.clear();
+    }
+
     fn on_msg(&mut self, m: ServerMsg, audio: &Audio) {
         match m {
             ServerMsg::Welcome { id, cfg } => {
+                self.set_map(cfg.map);
                 self.my_id = Some(id);
                 self.cfg = cfg;
                 self.status = Status::Connected;
@@ -531,6 +550,12 @@ impl Game {
             ServerMsg::Flashed { duration } => {
                 self.blind_t = self.blind_t.max(duration);
                 audio.play("ring", 0.5);
+            }
+            ServerMsg::MapChange { map } => {
+                self.set_map(map);
+                self.cfg.map = map;
+                self.overlay = Overlay::None;
+                self.center = Some((format!("Carte : {}", self.info.name), self.now + 4.0, ui::TEXT));
             }
             ServerMsg::MatchEnd { winner } => {
                 let (text, color) = match winner {

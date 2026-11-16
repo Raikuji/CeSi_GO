@@ -173,6 +173,8 @@ pub struct Settings {
     pub last_server: String,
     pub bot_skill: f32,
     pub bot_team_size: f32,
+    /// Carte des parties locales (indice dans `map::MAPS`).
+    pub map: u8,
     binds: BTreeMap<String, String>,
     pub crosshair: Crosshair,
     #[serde(skip)]
@@ -191,6 +193,7 @@ impl Default for Settings {
             last_server: "127.0.0.1:27500".into(),
             bot_skill: 50.0,
             bot_team_size: 5.0,
+            map: 0,
             binds: BTreeMap::new(),
             crosshair: Crosshair::default(),
             cache: Vec::new(),
@@ -216,6 +219,7 @@ impl Settings {
             .unwrap_or_default();
         s.sensitivity = s.sensitivity.clamp(0.05, 20.0);
         s.fov = s.fov.clamp(60.0, 120.0);
+        s.map = s.map.min(cesi_common::map::MAPS.len() as u8 - 1);
         s.rebuild();
         s
     }

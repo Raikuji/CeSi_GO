@@ -290,7 +290,7 @@ impl Game {
         let my_team = self.me().map(|m| m.team);
         let panel = Rect::new(240.0, 90.0, 800.0, 540.0);
         ui.rect(panel, PANEL);
-        ui.text_c(&self.cfg.server_name, 640.0, 128.0, 22.0, DIM);
+        ui.text_c(&format!("{} — {}", self.cfg.server_name, self.info.name), 640.0, 128.0, 22.0, DIM);
         ui.text_c(
             &format!("Round {} / {}", snap.round, self.cfg.max_rounds),
             640.0,

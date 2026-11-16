@@ -21,6 +21,7 @@ fn main() {
     let mut port: Option<u16> = None;
     let mut run_empty = false;
     let mut fast = false;
+    let mut map_name: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -32,10 +33,14 @@ fn main() {
                 port = args[i + 1].parse().ok();
                 i += 1;
             }
+            "--map" if i + 1 < args.len() => {
+                map_name = Some(args[i + 1].clone());
+                i += 1;
+            }
             "--run-empty" => run_empty = true,
             "--fast" => fast = true,
             "--help" | "-h" => {
-                println!("Usage : cesi_go_server [--config server.json] [--port 27500] [--run-empty] [--fast]");
+                println!("Usage : cesi_go_server [--config server.json] [--port 27500] [--map <nom|numéro>] [--run-empty] [--fast]");
                 return;
             }
             other => eprintln!("Argument ignoré : {}", other),
@@ -64,6 +69,9 @@ fn main() {
     if let Some(p) = port {
         cfg.port = p;
     }
+    if let Some(m) = map_name {
+        cfg.map = m;
+    }
     cfg.run_empty |= run_empty || fast;
     cfg.fast = fast;
 
@@ -78,6 +86,7 @@ fn main() {
         }
     };
     println!("Nom      : {}", cfg.name);
+    println!("Carte    : {}  (commande « map » pour en changer)", server.map_name());
     println!("Port     : {} (UDP)", server.port());
     if let Some(ip) = lan_ip() {
         println!("Adresse  : {}:{}  (à saisir dans « Rejoindre un serveur »)", ip, server.port());

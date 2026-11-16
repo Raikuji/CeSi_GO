@@ -18,7 +18,7 @@ Deux exécutables sont produits dans `target/release/` :
 
 ## Jouer
 
-- **Partie locale** : `cesi_go.exe` → Jouer → Lancer la partie.
+- **Partie locale** : `cesi_go.exe` → Jouer → choisir la carte → Lancer la partie.
 - **En réseau** : lancer `cesi_go_server.exe` sur une machine (port UDP 27500
   à autoriser dans le pare-feu), puis dans le jeu : Jouer → saisir l'adresse
   affichée par le serveur → Connexion. On peut aussi lancer
@@ -26,6 +26,19 @@ Deux exécutables sont produits dans `target/release/` :
 
 Les réglages (touches, sensibilité, viseur) se trouvent dans **Options** et
 sont enregistrés dans `%APPDATA%\CeSi_GO\settings.json`.
+
+## Cartes
+
+| Carte | Décor |
+| --- | --- |
+| Comptoir | Ville du désert : trois couloirs, les deux sites au nord |
+| Entrepôt | Zone portuaire : halle couverte pour le site B, quai à conteneurs pour le site A |
+| Citadelle | Forteresse enneigée : les deux sites dans la cour, sous le rempart des défenseurs |
+
+En partie locale, la carte se choisit dans l'écran Jouer (elle tourne en
+arrière-plan du menu). Sur un serveur dédié, c'est le serveur qui la fixe : clé
+`map` de `server.json`, option `--map` ou commande `map` de la console. Les
+joueurs connectés changent de carte sans se reconnecter.
 
 ## Grenades
 
@@ -53,6 +66,8 @@ Commandes de la console :
 | `status` | État du match et liste des joueurs |
 | `say <message>` | Message à tous les joueurs |
 | `kick <id\|nom>` | Expulse un joueur |
+| `map` | Liste les cartes |
+| `map <nom\|numéro>` | Change de carte et relance le match |
 | `bots <on\|off>` | Active ou désactive les bots |
 | `teamsize <n>` | Joueurs par équipe (bots compris) |
 | `difficulty <0-100>` | Niveau des bots |
@@ -62,12 +77,12 @@ Commandes de la console :
 | `restart` | Relance le match |
 | `quit` | Arrête le serveur |
 
-Options de lancement : `--config <fichier>`, `--port <n>`, `--run-empty`
+Options de lancement : `--config <fichier>`, `--port <n>`, `--map <nom|numéro>`, `--run-empty`
 (les bots jouent même sans joueur connecté), `--fast` (simulation accélérée bots
 contre bots, pour mesurer l'équilibrage).
 
 ## Organisation du code
 
-- `common/` — monde voxel, carte, armes, physique du joueur, protocole réseau.
+- `common/` — monde voxel, cartes, armes, physique du joueur, protocole réseau.
 - `server/` — logique de jeu (rounds, économie, bombe, tirs, bots) et console.
 - `client/` — rendu, entrées, HUD, menus, sons.

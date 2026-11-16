@@ -4,6 +4,7 @@ use crate::hud::draw_crosshair;
 use crate::keys::ALL_KEYS;
 use crate::settings::{Bind, Settings, ACTIONS};
 use crate::ui::{Ui, ACCENT, DIM, PANEL, TEXT};
+use cesi_common::map::MAPS;
 use macroquad::prelude::*;
 
 #[derive(PartialEq, Clone, Copy)]
@@ -66,43 +67,52 @@ pub fn main_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) -> MenuActio
             ui.text("Serveur dédié : lancez cesi_go_server.exe", 94.0, 690.0, 15.0, DIM);
         }
         Screen::Play => {
-            ui.text("JOUER", 90.0, 110.0, 44.0, TEXT);
-            ui.text("Pseudo", 90.0, 168.0, 18.0, DIM);
-            ui.textfield(1, Rect::new(180.0, 144.0, 280.0, 36.0), &mut s.name, 16);
+            ui.text("JOUER", 90.0, 100.0, 44.0, TEXT);
+            ui.text("Pseudo", 90.0, 154.0, 18.0, DIM);
+            ui.textfield(1, Rect::new(180.0, 130.0, 280.0, 36.0), &mut s.name, 16);
 
-            let left = Rect::new(90.0, 210.0, 520.0, 330.0);
+            let left = Rect::new(90.0, 190.0, 520.0, 380.0);
             ui.rect(left, PANEL);
-            ui.text("Partie locale contre des bots", 114.0, 252.0, 24.0, TEXT);
-            ui.text("Joueurs par équipe", 114.0, 310.0, 18.0, DIM);
-            ui.slider(2, Rect::new(114.0, 322.0, 380.0, 24.0), &mut s.bot_team_size, 1.0, 5.0);
+            ui.text("Partie locale contre des bots", 114.0, 230.0, 24.0, TEXT);
+            // Sélecteur de carte : la carte choisie tourne en arrière-plan.
+            ui.text("Carte", 114.0, 268.0, 18.0, DIM);
+            for (i, m) in MAPS.iter().enumerate() {
+                if ui.tab(Rect::new(114.0 + i as f32 * 160.0, 280.0, 152.0, 40.0), m.name, s.map as usize == i) {
+                    s.map = i as u8;
+                }
+            }
+            ui.text(MAPS[s.map as usize % MAPS.len()].desc, 114.0, 346.0, 15.0, DIM);
+            ui.text("Joueurs par équipe", 114.0, 384.0, 18.0, DIM);
+            ui.slider(2, Rect::new(114.0, 396.0, 380.0, 24.0), &mut s.bot_team_size, 1.0, 5.0);
             s.bot_team_size = s.bot_team_size.round();
-            ui.text(&format!("{} contre {}", s.bot_team_size, s.bot_team_size), 510.0, 340.0, 18.0, TEXT);
-            ui.text("Niveau des bots", 114.0, 392.0, 18.0, DIM);
-            ui.slider(3, Rect::new(114.0, 404.0, 380.0, 24.0), &mut s.bot_skill, 0.0, 100.0);
+            ui.text(&format!("{} contre {}", s.bot_team_size, s.bot_team_size), 510.0, 414.0, 18.0, TEXT);
+            ui.text("Niveau des bots", 114.0, 452.0, 18.0, DIM);
+            ui.slider(3, Rect::new(114.0, 464.0, 380.0, 24.0), &mut s.bot_skill, 0.0, 100.0);
             let level = match s.bot_skill as i32 {
                 0..=24 => "Facile",
                 25..=54 => "Normal",
                 55..=79 => "Difficile",
                 _ => "Expert",
             };
-            ui.text(level, 510.0, 422.0, 18.0, TEXT);
-            if ui.button(Rect::new(114.0, 464.0, 300.0, 52.0), "LANCER LA PARTIE", true) {
+            ui.text(level, 510.0, 482.0, 18.0, TEXT);
+            if ui.button(Rect::new(114.0, 508.0, 300.0, 48.0), "LANCER LA PARTIE", true) {
                 action = MenuAction::PlayLocal;
             }
 
-            let right = Rect::new(670.0, 210.0, 520.0, 330.0);
+            let right = Rect::new(670.0, 190.0, 520.0, 380.0);
             ui.rect(right, PANEL);
-            ui.text("Rejoindre un serveur", 694.0, 252.0, 24.0, TEXT);
-            ui.text("Adresse du serveur (ip ou ip:port)", 694.0, 310.0, 18.0, DIM);
-            ui.textfield(4, Rect::new(694.0, 324.0, 400.0, 38.0), &mut s.last_server, 60);
-            ui.text("Le serveur se lance avec cesi_go_server.exe,", 694.0, 400.0, 16.0, DIM);
-            ui.text("qui affiche l'adresse à saisir ici.", 694.0, 422.0, 16.0, DIM);
-            if ui.button(Rect::new(694.0, 464.0, 300.0, 52.0), "CONNEXION", !s.last_server.trim().is_empty()) {
+            ui.text("Rejoindre un serveur", 694.0, 230.0, 24.0, TEXT);
+            ui.text("Adresse du serveur (ip ou ip:port)", 694.0, 290.0, 18.0, DIM);
+            ui.textfield(4, Rect::new(694.0, 304.0, 400.0, 38.0), &mut s.last_server, 60);
+            ui.text("Le serveur se lance avec cesi_go_server.exe,", 694.0, 384.0, 16.0, DIM);
+            ui.text("qui affiche l'adresse à saisir ici.", 694.0, 406.0, 16.0, DIM);
+            ui.text("La carte est choisie par le serveur (commande « map »).", 694.0, 440.0, 16.0, DIM);
+            if ui.button(Rect::new(694.0, 508.0, 300.0, 48.0), "CONNEXION", !s.last_server.trim().is_empty()) {
                 action = MenuAction::Join;
             }
 
             if let Some(e) = &st.error {
-                ui.text(e, 94.0, 586.0, 20.0, Color::new(1.0, 0.45, 0.35, 1.0));
+                ui.text(e, 94.0, 600.0, 20.0, Color::new(1.0, 0.45, 0.35, 1.0));
             }
             if ui.button(Rect::new(90.0, 620.0, 200.0, 48.0), "RETOUR", true) {
                 st.screen = Screen::Main;

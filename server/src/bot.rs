@@ -150,6 +150,18 @@ impl Bot {
         self.blind_t = self.blind_t.max(duration * 0.8);
     }
 
+    /// Oublie trajet et repères : à appeler quand la carte change.
+    pub fn forget(&mut self) {
+        self.path.clear();
+        self.path_i = 0;
+        self.repath_t = 0.0;
+        self.spot = None;
+        self.watch = None;
+        self.last_seen = None;
+        self.target = None;
+        self.visible = false;
+    }
+
     pub fn reloading(&self) -> bool {
         self.reload_t > 0.0
     }
