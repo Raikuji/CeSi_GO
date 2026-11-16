@@ -1,6 +1,7 @@
 //! Serveur de jeu : connexions, rounds, économie, bombe, tirs et bots.
 
 use crate::bot::{Bot, BotCtx};
+use crate::drops::Drop;
 use crate::nades::{Area, Nade};
 use crate::nav::Nav;
 use cesi_common::glam::{vec3, Vec3};
@@ -124,7 +125,7 @@ pub struct Player {
 }
 
 impl Player {
-    fn new(id: PlayerId, name: String, team: Team, money: u32, bot: Option<Box<Bot>>) -> Player {
+    pub(crate) fn new(id: PlayerId, name: String, team: Team, money: u32, bot: Option<Box<Bot>>) -> Player {
         Player {
             id,
             name,
@@ -214,6 +215,8 @@ pub struct Server {
     pub(crate) nades: Vec<Nade>,
     pub(crate) areas: Vec<Area>,
     pub(crate) next_nade: u16,
+    pub(crate) drops: Vec<Drop>,
+    pub(crate) next_drop: u16,
 }
 
 /// Intersection rayon / boîte ; renvoie la distance d'entrée.
@@ -302,6 +305,8 @@ impl Server {
             nades: Vec::new(),
             areas: Vec::new(),
             next_nade: 0,
+            drops: Vec::new(),
+            next_drop: 0,
         })
     }
 
@@ -503,6 +508,7 @@ impl Server {
         if self.conns.is_empty() && !self.cfg.run_empty {
             self.phase = Phase::Warmup;
             self.players.clear();
+            self.drops.clear();
             self.bomb = BombState::None;
             self.say("Plus aucun joueur : serveur en attente");
         } else {
@@ -564,6 +570,8 @@ impl Server {
                 self.apply_shot(i, origin, dir.normalize(), wid, rt, if heavy { KNIFE_HEAVY_MULT } else { 1.0 });
             }
             ClientMsg::Throw { kind, origin, dir, strong } => self.throw_nade(i, kind, origin, dir, strong),
+            ClientMsg::Pickup { id, mag, reserve } => self.pickup(i, id, mag, reserve, false),
+            ClientMsg::Drop { slot, mag, reserve } => self.throw_weapon(i, slot, mag, reserve),
             ClientMsg::Buy(item) => {
                 self.try_buy(i, item);
             }
@@ -637,6 +645,7 @@ impl Server {
                 .collect(),
             nades: self.nades.iter().map(|n| NadeSnap { id: n.id, kind: n.kind, pos: n.pos }).collect(),
             areas: self.areas.iter().map(|a| AreaSnap { id: a.id, kind: a.kind, pos: a.pos, time_left: a.time_left }).collect(),
+            drops: self.drops.iter().map(|d| DropSnap { id: d.id, weapon: d.weapon, pos: d.pos, yaw: d.yaw }).collect(),
         };
         for (addr, c) in self.conns.iter() {
             let _ = self.socket.send_to(&c.chan.build(Some(&snap)), addr);
@@ -718,6 +727,7 @@ impl Server {
         self.bomb = BombState::None;
         self.nades.clear();
         self.areas.clear();
+        self.drops.clear();
         for p in &mut self.players {
             p.history.clear();
             if let Some(b) = p.bot.as_mut() {
@@ -789,6 +799,7 @@ impl Server {
         self.bomb = BombState::None;
         self.nades.clear();
         self.areas.clear();
+        self.drops.clear();
         self.t_site = self.rng.below(2) as u8;
         for i in 0..self.players.len() {
             if !self.players[i].alive || self.players[i].fresh {
@@ -1212,6 +1223,7 @@ impl Server {
                 throws.push((i, t));
             }
         }
+        self.auto_pickup();
         for (i, (kind, origin, dir)) in throws {
             self.throw_nade(i, kind, origin, dir, true);
         }
@@ -1305,6 +1317,10 @@ impl Server {
         if self.bomb == BombState::Carried(vid) {
             self.bomb = BombState::Dropped(vpos);
         }
+        // Son arme reste au sol : la principale, sinon le pistolet.
+        let v = &mut self.players[victim];
+        let dropped = if v.primary != 0 { std::mem::take(&mut v.primary) } else { std::mem::take(&mut v.secondary) };
+        self.drop_weapon(dropped, vpos, None);
         let mut killer = None;
         if let Some(a) = attacker {
             let p = &mut self.players[a];
@@ -1550,6 +1566,20 @@ impl Server {
                     (self.log)(&format!("{} = {} (les durées s'appliquent au prochain round)", key, val));
                 } else {
                     (self.log)("Usage : set <round_time|freeze_time|buy_time|bomb_time|max_rounds|start_money|max_players|name> <valeur>");
+                }
+            }
+            "drop" => {
+                // Diagnostic : « drop <joueur> <n° d'arme> » pose une arme devant le joueur.
+                let mut it = rest.split_whitespace();
+                let who = it.next().and_then(|w| self.find_player(w));
+                let wid = it.next().and_then(|a| a.parse::<u8>().ok()).filter(|w| (1..WEAPONS.len() as u8).contains(w));
+                match (who, wid) {
+                    (Some(i), Some(wid)) => {
+                        let p = &self.players[i];
+                        let pos = p.pos + cesi_common::dir_from_angles(p.yaw, 0.0) * 1.1;
+                        self.drop_weapon(wid, pos, None);
+                    }
+                    _ => out!("Usage : drop <id|nom> <1-12>"),
                 }
             }
             "debug" => {

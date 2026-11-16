@@ -687,7 +687,7 @@ pub fn draw_player(b: &mut Batch, v: &PlayerView, a: &Puppet) {
 }
 
 /// Corps qui s'effondre ; `t` va de 0 (debout) à 1 (au sol), l'arme tombe à côté.
-pub fn draw_corpse(b: &mut Batch, pos: Vec3, yaw: f32, team: Team, t: f32, weapon_id: u8) {
+pub fn draw_corpse(b: &mut Batch, pos: Vec3, yaw: f32, team: Team, t: f32) {
     let k = t.clamp(0.0, 1.0);
     let e = 1.0 - (1.0 - k).powi(3);
     let bounce = if k > 0.7 && k < 1.0 { ((k - 0.7) / 0.3 * std::f32::consts::PI).sin() * 0.07 } else { 0.0 };
@@ -711,10 +711,6 @@ pub fn draw_corpse(b: &mut Batch, pos: Vec3, yaw: f32, team: Team, t: f32, weapo
         let am = m * Mat4::from_translation(vec3(s * 0.27, 1.34, 0.0)) * Mat4::from_rotation_z(s * (0.3 + 0.9 * e));
         b.cube(&am, vec3(-0.055, -0.56, -0.055), vec3(0.055, 0.0, 0.055), shirt);
         b.cube(&am, vec3(-0.05, -0.64, -0.05), vec3(0.05, -0.56, 0.05), SKIN);
-    }
-    if k > 0.25 && weapon(weapon_id).class != Class::Knife {
-        let wm = basis(pos, yaw + 0.7) * Mat4::from_translation(vec3(0.55, 0.035, -0.5 * e)) * Mat4::from_rotation_z(1.5708);
-        weapon_model(b, &wm, weapon_id, &WeaponPose::default());
     }
 }
 

@@ -64,6 +64,8 @@ pub const KNIFE_COOLDOWN: f32 = 0.5;
 /// Délai après un coup puissant (s).
 pub const KNIFE_HEAVY_COOLDOWN: f32 = 1.3;
 /// Multiplicateur de dégâts du coup puissant.
+/// Distance maximale pour ramasser une arme au sol.
+pub const PICKUP_RANGE: f32 = 2.6;
 pub const KNIFE_HEAVY_MULT: f32 = 2.0;
 
 pub const PRICE_KEVLAR: u32 = 650;

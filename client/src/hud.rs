@@ -3,7 +3,7 @@
 
 use crate::audio::Audio;
 use crate::game::{Game, Overlay, Status};
-use crate::settings::{Action, Crosshair, Settings};
+use crate::settings::{Action, Crosshair, Settings, NADE_ACTIONS};
 use crate::ui::{Ui, ACCENT, CT_COLOR, DIM, PANEL, TEXT, T_COLOR, WIDGET, WIDGET_HOT};
 use crate::render::ss;
 use cesi_common::grenades::*;
@@ -223,21 +223,11 @@ impl Game {
             }
             let slots = [(0usize, st.bind(Action::Primary)), (1, st.bind(Action::Secondary)), (2, st.bind(Action::Knife))];
             let mut y = h - 96.0 * k;
-            // Grenades possédées ; le type sélectionné est entre chevrons quand il est en main.
-            let owned: Vec<String> = (0..4)
-                .filter(|i| me.nades[*i] > 0)
-                .map(|i| {
-                    let n = if me.nades[i] > 1 { format!("{} ×{}", GRENADES[i].short, me.nades[i]) } else { GRENADES[i].short.to_string() };
-                    if self.slot == 3 && self.nade == i {
-                        format!("‹{}›", n)
-                    } else {
-                        n
-                    }
-                })
-                .collect();
-            if !owned.is_empty() {
-                let text = format!("{}   [{}]", owned.join(" · "), st.bind(Action::Grenade).label());
-                ui.shadow_px_r(&text, right, y, 16.0 * k, if self.slot == 3 { TEXT } else { DIM });
+            // Grenades possédées, chacune avec sa touche ; celle en main est mise en avant.
+            for i in (0..4).rev().filter(|i| me.nades[*i] > 0) {
+                let n = if me.nades[i] > 1 { format!("{} ×{}", GRENADES[i].name, me.nades[i]) } else { GRENADES[i].name.to_string() };
+                let text = format!("{}   [{}]", n, st.bind(NADE_ACTIONS[i]).label());
+                ui.shadow_px_r(&text, right, y, 16.0 * k, if self.slot == 3 && self.nade == i { TEXT } else { DIM });
                 y -= 22.0 * k;
             }
             for (s, bind) in slots.iter().rev() {
@@ -259,6 +249,13 @@ impl Game {
                 ui.shadow_px_c(label, w / 2.0, h * 0.62 - 10.0 * k, 18.0 * k, TEXT);
                 draw_rectangle(w / 2.0 - bw / 2.0, h * 0.62, bw, bh, Color::new(0.0, 0.0, 0.0, 0.6));
                 draw_rectangle(w / 2.0 - bw / 2.0, h * 0.62, bw * me.progress.clamp(0.0, 1.0), bh, ACCENT);
+            } else if let Some((_, wid)) = self.aim_drop {
+                let mine = self.ammo[if weapon(wid).class == Class::Pistol { 1 } else { 0 }].id;
+                hint = Some(if mine != 0 {
+                    format!("[{}] Échanger {} contre {}", use_key, weapon(mine).name, weapon(wid).name)
+                } else {
+                    format!("[{}] Ramasser {}", use_key, weapon(wid).name)
+                });
             } else if self.has_bomb() && self.info.site_of(self.body.pos).is_some() && snap.phase == Phase::Live {
                 hint = Some(format!("Maintenez [{}] pour poser la bombe", use_key));
             } else if me.team == Team::CT && matches!(snap.bomb, BombState::Planted { pos, .. } if pos.distance(self.body.pos) < 1.8) {
@@ -266,7 +263,12 @@ impl Game {
             } else if let (Some(left), true, true) = (self.buy_time_left(), self.in_buy_zone(), self.overlay == Overlay::None) {
                 hint = Some(format!("[{}] Acheter des armes — encore {} s", st.bind(Action::Buy).label(), left.ceil()));
             } else if self.slot == 3 {
-                hint = Some(format!("[{}] lancer long · [{}] lancer court", st.bind(Action::Fire).label(), st.bind(Action::Aim).label()));
+                hint = Some(format!(
+                    "[{}] lancer long · [{}] lancer court · [{}] type suivant",
+                    st.bind(Action::Fire).label(),
+                    st.bind(Action::Aim).label(),
+                    st.bind(Action::Grenade).label()
+                ));
             }
             if let Some(t) = hint {
                 ui.shadow_px_c(&t, w / 2.0, h * 0.66, 18.0 * k, Color::new(1.0, 0.9, 0.5, 1.0));
@@ -446,8 +448,9 @@ impl Game {
             }
             y += 44.0;
         }
-        ui.text(&format!("[{}] pour prendre une grenade en main,", st.bind(Action::Grenade).label()), cols[3], 384.0, 14.0, DIM);
-        ui.text("encore pour changer de type.", cols[3], 402.0, 14.0, DIM);
+        let keys: Vec<String> = NADE_ACTIONS.iter().map(|a| st.bind(*a).label()).collect();
+        ui.text(&format!("[{}] : une touche par grenade,", keys.join("] [")), cols[3], 384.0, 14.0, DIM);
+        ui.text(&format!("[{}] : type suivant.", st.bind(Action::Grenade).label()), cols[3], 402.0, 14.0, DIM);
         ui.text("Clic gauche : lancer long", cols[3], 430.0, 14.0, DIM);
         ui.text("Clic droit : lancer court", cols[3], 448.0, 14.0, DIM);
 

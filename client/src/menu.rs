@@ -215,14 +215,14 @@ fn tab_keys(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) {
         }
     }
     for (i, (action, _, label)) in ACTIONS.iter().enumerate() {
-        let (col, row) = (i / 9, i % 9);
-        let x = 190.0 + col as f32 * 470.0;
-        let y = 180.0 + row as f32 * 46.0;
-        ui.text(label, x, y + 25.0, 19.0, TEXT);
-        let r = Rect::new(x + 235.0, y, 195.0, 38.0);
+        let (col, row) = (i / 12, i % 12);
+        let x = 180.0 + col as f32 * 480.0;
+        let y = 168.0 + row as f32 * 37.0;
+        ui.text(label, x, y + 22.0, 18.0, TEXT);
+        let r = Rect::new(x + 270.0, y, 180.0, 32.0);
         if st.rebinding == Some(i) {
             ui.rect(r, ACCENT);
-            ui.text_c("Appuyez…", r.x + r.w / 2.0, r.y + 26.0, 18.0, BLACK);
+            ui.text_c("Appuyez…", r.x + r.w / 2.0, r.y + 22.0, 17.0, BLACK);
         } else if ui.button(r, &s.bind(*action).label(), true) && st.rebinding.is_none() {
             st.rebinding = Some(i);
             st.rebind_skip = true;

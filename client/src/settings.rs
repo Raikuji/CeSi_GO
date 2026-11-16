@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+/// Touches de sélection directe, dans l'ordre des types de grenade.
+pub const NADE_ACTIONS: [Action; 4] = [Action::NadeFrag, Action::NadeSmoke, Action::NadeFlash, Action::NadeFire];
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Action {
     Forward,
@@ -19,17 +22,22 @@ pub enum Action {
     Aim,
     Reload,
     Use,
+    Drop,
     Buy,
     Scoreboard,
     Primary,
     Secondary,
     Knife,
     Grenade,
+    NadeFrag,
+    NadeSmoke,
+    NadeFlash,
+    NadeFire,
     Chat,
 }
 
 /// (action, identifiant dans le fichier, libellé du menu)
-pub const ACTIONS: [(Action, &str, &str); 18] = [
+pub const ACTIONS: [(Action, &str, &str); 23] = [
     (Action::Forward, "forward", "Avancer"),
     (Action::Back, "back", "Reculer"),
     (Action::Left, "left", "Gauche"),
@@ -40,13 +48,18 @@ pub const ACTIONS: [(Action, &str, &str); 18] = [
     (Action::Fire, "fire", "Tirer"),
     (Action::Aim, "aim", "Lunette / coup puissant"),
     (Action::Reload, "reload", "Recharger"),
-    (Action::Use, "use", "Poser / désamorcer"),
+    (Action::Use, "use", "Poser / désamorcer / échanger"),
+    (Action::Drop, "drop", "Jeter l'arme"),
     (Action::Buy, "buy", "Menu d'achat"),
     (Action::Scoreboard, "scoreboard", "Tableau des scores"),
     (Action::Primary, "primary", "Arme principale"),
     (Action::Secondary, "secondary", "Pistolet"),
     (Action::Knife, "knife", "Couteau"),
-    (Action::Grenade, "grenade", "Grenades (changer de type)"),
+    (Action::Grenade, "grenade", "Grenades (type suivant)"),
+    (Action::NadeFrag, "nade_frag", "Grenade à fragmentation"),
+    (Action::NadeSmoke, "nade_smoke", "Fumigène"),
+    (Action::NadeFlash, "nade_flash", "Grenade aveuglante"),
+    (Action::NadeFire, "nade_fire", "Grenade incendiaire"),
     (Action::Chat, "chat", "Discussion"),
 ];
 
@@ -118,12 +131,17 @@ fn default_bind(a: Action) -> Bind {
         Action::Aim => Bind::Mouse(MouseButton::Right),
         Action::Reload => Bind::Key(KeyCode::R),
         Action::Use => Bind::Key(KeyCode::E),
+        Action::Drop => Bind::Key(KeyCode::G),
         Action::Buy => Bind::Key(KeyCode::B),
         Action::Scoreboard => Bind::Key(KeyCode::Tab),
         Action::Primary => Bind::Key(KeyCode::Key1),
         Action::Secondary => Bind::Key(KeyCode::Key2),
         Action::Knife => Bind::Key(KeyCode::Key3),
         Action::Grenade => Bind::Key(KeyCode::Key4),
+        Action::NadeFrag => Bind::Key(KeyCode::Key5),
+        Action::NadeSmoke => Bind::Key(KeyCode::Key6),
+        Action::NadeFlash => Bind::Key(KeyCode::Key7),
+        Action::NadeFire => Bind::Key(KeyCode::Key8),
         Action::Chat => Bind::Key(KeyCode::Y),
     }
 }

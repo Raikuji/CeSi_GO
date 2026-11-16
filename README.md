@@ -43,9 +43,10 @@ joueurs connectés changent de carte sans se reconnecter.
 ## Grenades
 
 Quatre grenades s'achètent dans le menu d'achat (quatre au maximum, une de
-chaque type, deux aveuglantes). La touche `4` prend une grenade en main, puis
-passe au type suivant ; clic gauche pour un lancer long, clic droit pour un
-lancer court.
+chaque type, deux aveuglantes). Chaque type a sa touche : `5` fragmentation,
+`6` fumigène, `7` aveuglante, `8` incendiaire ; la touche `4` prend une grenade
+en main, puis passe au type suivant. Clic gauche pour un lancer long, clic
+droit pour un lancer court.
 
 | Grenade | Prix | Effet |
 | --- | --- | --- |
@@ -53,6 +54,17 @@ lancer court.
 | Fumigène | 300 $ | Nuage opaque pendant 15 s, éteint les flammes |
 | Aveuglante | 200 $ | Aveugle ceux qui la regardent exploser, alliés compris |
 | Incendiaire | 500 $ | S'enflamme au sol pendant 7 s, brûle ceux qui traversent |
+
+## Armes au sol
+
+Un joueur éliminé laisse son arme par terre (la principale, sinon son
+pistolet) jusqu'à la fin du round, et la touche `G` jette l'arme en main devant
+soi, par exemple pour la donner à un coéquipier.
+
+- **En passant dessus** : l'arme est ramassée si l'emplacement correspondant
+  (arme principale ou pistolet) est vide.
+- **Avec `E`** en la visant de près : elle est échangée contre celle que vous
+  portez, qui prend sa place au sol avec ses munitions.
 
 ## Serveur
 

@@ -260,7 +260,9 @@ async fn main() {
                     menu.screen = Screen::Settings;
                     menu.tab = ["options", "touches", "viseur"].iter().position(|m| m == mode).unwrap_or(0);
                 }
-                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" | "nade" | "main" if game.is_none() && start.is_none() => {
+                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" | "nade" | "main" | "sol" | "echange" | "jeter"
+                    if game.is_none() && start.is_none() =>
+                {
                     start = Some(true);
                     shot_at = Some(get_time() + if mode == "nade" { 11.5 } else { 9.0 });
                 }
@@ -276,6 +278,13 @@ async fn main() {
             // « nade » : --shot nade <fichier> --nade <type> achète et lance la grenade.
             if let Some(i) = args.iter().position(|a| a == "--nade") {
                 g.debug_nade = args.get(i + 1).and_then(|a| a.parse().ok());
+            }
+            // « sol » regarde par terre ; « echange » ramasse en plus les armes visées (deux fois).
+            // « jeter » jette l'arme en main puis regarde où elle est tombée.
+            if (mode == "sol" || mode == "echange" || mode == "jeter") && !g.debug_look {
+                g.debug_look = true;
+                g.debug_pick = if mode == "echange" { 2 } else { 0 };
+                g.debug_drop = mode == "jeter";
             }
             if mode == "achats" && g.can_buy() {
                 g.overlay = Overlay::Buy;

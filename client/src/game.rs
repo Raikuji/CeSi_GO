@@ -5,14 +5,14 @@ use crate::audio::Audio;
 use crate::netclient::NetClient;
 use crate::render::{self, Batch, PlayerView, Puppet, WorldRender};
 use crate::viewmodel::{self, ViewAnim};
-use crate::settings::{Action, Settings};
+use crate::settings::{Action, Settings, NADE_ACTIONS};
 use crate::ui;
 use cesi_common::grenades::*;
 use cesi_common::map::{self, MapInfo};
 use cesi_common::physics::{self, eye_height, Body, MoveInput, BASE_SPEED};
 use cesi_common::protocol::*;
 use cesi_common::voxel::{block_color, World};
-use cesi_common::weapons::{weapon, Class, WeaponDef, KNIFE, KNIFE_COOLDOWN, KNIFE_HEAVY_COOLDOWN, KNIFE_RANGE};
+use cesi_common::weapons::{weapon, Class, WeaponDef, KNIFE, KNIFE_COOLDOWN, KNIFE_HEAVY_COOLDOWN, KNIFE_RANGE, PICKUP_RANGE};
 use cesi_common::{angle_diff, dir_from_angles, hdist, perturb, Rng};
 use macroquad::prelude::*;
 use std::collections::{HashMap, VecDeque};
@@ -62,7 +62,6 @@ pub struct Corpse {
     yaw: f32,
     team: Team,
     t0: f64,
-    weapon: u8,
 }
 
 pub struct KillLine {
@@ -163,6 +162,14 @@ pub struct Game {
     pub debug_bought: bool,
     /// La carte vient de changer : le rendu du monde doit être refait.
     pub map_dirty: bool,
+    /// Arme au sol visée, à portée de main : (identifiant, arme).
+    pub aim_drop: Option<(u16, u8)>,
+    pub pickup_cd: f32,
+    /// Diagnostic : regard forcé vers le sol, et nombre de ramassages automatiques restants.
+    pub debug_look: bool,
+    pub debug_pick: u8,
+    /// Diagnostic : jette l'arme en main quelques secondes après le début.
+    pub debug_drop: bool,
     pub rng: Rng,
 }
 
@@ -250,6 +257,11 @@ impl Game {
             debug_nade: None,
             debug_bought: false,
             map_dirty: false,
+            aim_drop: None,
+            pickup_cd: 0.0,
+            debug_look: false,
+            debug_pick: 0,
+            debug_drop: false,
             rng: Rng::from_time(),
         })
     }
@@ -551,6 +563,21 @@ impl Game {
                 self.blind_t = self.blind_t.max(duration);
                 audio.play("ring", 0.5);
             }
+            ServerMsg::Picked { weapon: wid, mag, reserve, auto } => {
+                let s = if weapon(wid).class == Class::Pistol { 1 } else { 0 };
+                self.ammo[s] = Ammo { id: wid, mag, reserve };
+                // Échangée à la main, l'arme vient en main ; ramassée en passant, seulement
+                // si l'on ne tenait que le couteau (pas de changement d'arme en plein tir).
+                if !auto || self.slot == 2 || self.slot == s {
+                    self.slot = s;
+                    self.draw_t = 0.4;
+                    self.reload_t = 0.0;
+                    self.zoom = 0;
+                    self.rescope = (0.0, 0);
+                    self.throw_t = 0.0;
+                }
+                audio.play("rack", 0.5);
+            }
             ServerMsg::MapChange { map } => {
                 self.set_map(map);
                 self.cfg.map = map;
@@ -585,7 +612,7 @@ impl Game {
         });
         for p in &s.players {
             if self.alive_prev.insert(p.id, p.alive) == Some(true) && !p.alive {
-                self.corpses.push(Corpse { pos: p.pos, yaw: p.yaw, team: p.team, t0: self.now, weapon: p.weapon });
+                self.corpses.push(Corpse { pos: p.pos, yaw: p.yaw, team: p.team, t0: self.now });
             }
         }
         self.snaps.push_back(s);
@@ -742,6 +769,7 @@ impl Game {
         // Effets
         self.fire_cd -= dt;
         self.throw_cd -= dt;
+        self.pickup_cd -= dt;
         self.throw_anim += dt;
         self.blind_t -= dt;
         self.draw_t -= dt;
@@ -784,6 +812,25 @@ impl Game {
         }
         let can_act = me.alive && self.overlay == Overlay::None;
         let def = weapon(self.weapon_id());
+        if self.debug_look {
+            self.pitch = -1.0;
+        }
+        // Arme au sol sous le viseur, à portée de main.
+        self.aim_drop = None;
+        if let (true, Some(s)) = (can_act, self.snaps.back()) {
+            let (yaw, pitch) = self.view_angles();
+            let (eye, dir) = (self.body.eye(), dir_from_angles(yaw, pitch));
+            let mut best = 0.5;
+            for d in &s.drops {
+                let to = d.pos + Vec3::Y * 0.1 - eye;
+                let along = to.dot(dir);
+                let off = (to - dir * along).length();
+                if along > 0.0 && off < best && hdist(d.pos, self.body.pos) < PICKUP_RANGE && (d.pos.y - self.body.pos.y).abs() < 2.0 {
+                    best = off;
+                    self.aim_drop = Some((d.id, d.weapon));
+                }
+            }
+        }
 
         if me.alive {
             // Regard
@@ -804,7 +851,8 @@ impl Game {
                 inp.jump = st.pressed(Action::Jump);
                 inp.crouch = st.down(Action::Crouch);
                 inp.walk = st.down(Action::Walk);
-                self.using = st.down(Action::Use);
+                // Viser une arme au sol réserve la touche au ramassage.
+                self.using = st.down(Action::Use) && self.aim_drop.is_none();
                 let planting = self.has_bomb() && self.info.site_of(self.body.pos).is_some();
                 let defusing = me.team == Team::CT
                     && matches!(bomb, BombState::Planted { pos, .. } if pos.distance(self.body.pos) < 1.8);
@@ -848,7 +896,36 @@ impl Game {
                 if st.pressed(Action::Knife) {
                     self.switch_to(2);
                 }
-                // Grenades : la touche sélectionne la grenade, puis passe au type suivant.
+                // Échange avec l'arme au sol visée : la nôtre prend sa place.
+                let auto = self.debug_pick > 0 && self.aim_drop.is_some();
+                if let (Some((id, wid)), true) = (self.aim_drop, (st.pressed(Action::Use) || auto) && self.pickup_cd <= 0.0 && self.throw_t <= 0.0) {
+                    let a = self.ammo[if weapon(wid).class == Class::Pistol { 1 } else { 0 }];
+                    self.net.reliable(ClientMsg::Pickup { id, mag: a.mag, reserve: a.reserve });
+                    self.pickup_cd = 0.6;
+                    self.debug_pick = self.debug_pick.saturating_sub(1);
+                }
+                // Jeter l'arme en main : elle retombe devant nous, un coéquipier peut la prendre.
+                let auto_drop = self.debug_drop && self.now - self.start > 7.0;
+                if (st.pressed(Action::Drop) || auto_drop) && self.slot < 2 && self.ammo[self.slot].id != 0 && self.pickup_cd <= 0.0 {
+                    let a = self.ammo[self.slot];
+                    self.net.reliable(ClientMsg::Drop { slot: self.slot as u8, mag: a.mag, reserve: a.reserve });
+                    self.pickup_cd = 0.6;
+                    self.debug_drop = false;
+                    audio.play("throw", 0.5);
+                }
+                // Grenades : une touche par type…
+                for (k, a) in NADE_ACTIONS.into_iter().enumerate() {
+                    if st.pressed(a) && me.nades[k] > 0 && self.throw_t <= 0.0 {
+                        if self.slot != 3 {
+                            self.nade = k;
+                            self.switch_to(3);
+                        } else if self.nade != k {
+                            self.nade = k;
+                            self.draw_t = 0.25;
+                        }
+                    }
+                }
+                // … et une touche commune qui prend la grenade, puis passe au type suivant.
                 let owned: Vec<usize> = (0..4).filter(|k| me.nades[*k] > 0).collect();
                 if st.pressed(Action::Grenade) && !owned.is_empty() && self.throw_t <= 0.0 {
                     if self.slot == 3 {
@@ -1114,7 +1191,7 @@ impl Game {
             }
         }
         for c in &self.corpses {
-            render::draw_corpse(batch, c.pos, c.yaw, c.team, ((self.now - c.t0) / 0.6) as f32, c.weapon);
+            render::draw_corpse(batch, c.pos, c.yaw, c.team, ((self.now - c.t0) / 0.6) as f32);
         }
         match self.snap().map(|s| s.bomb) {
             Some(BombState::Planted { pos, .. }) | Some(BombState::Dropped(pos)) | Some(BombState::Defused(pos)) => {
@@ -1122,6 +1199,13 @@ impl Game {
                 render::bomb_model(batch, &Mat4::from_translation(pos), blink);
             }
             _ => {}
+        }
+        // Armes au sol, couchées sur le flanc.
+        if let Some(s) = self.snaps.back() {
+            for d in &s.drops {
+                let m = render::basis(d.pos + Vec3::Y * 0.04, d.yaw) * Mat4::from_rotation_z(1.5708);
+                render::weapon_model(batch, &m, d.weapon, &render::WeaponPose::default());
+            }
         }
         // Grenades en vol, fumées et flammes.
         let t = self.now as f32;

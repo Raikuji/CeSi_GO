@@ -3,7 +3,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL: u16 = 5;
+pub const PROTOCOL: u16 = 7;
 pub const DEFAULT_PORT: u16 = 27500;
 pub const TICK_RATE: u32 = 60;
 
@@ -95,6 +95,11 @@ pub enum ClientMsg {
     Buy(BuyItem),
     /// Lancer de grenade ; `strong` : lancer long (sinon lancer court).
     Throw { kind: u8, origin: Vec3, dir: Vec3, strong: bool },
+    /// Prend l'arme au sol `id` ; `mag` et `reserve` sont les munitions de l'arme
+    /// laissée en échange.
+    Pickup { id: u16, mag: u16, reserve: u16 },
+    /// Jette l'arme de l'emplacement `slot` (0 principale, 1 pistolet) avec ses munitions.
+    Drop { slot: u8, mag: u16, reserve: u16 },
     SwitchTeam,
     Chat(String),
 }
@@ -141,6 +146,9 @@ pub enum ServerMsg {
     MatchEnd { winner: Option<Team> },
     /// Le serveur change de carte : le client la reconstruit.
     MapChange { map: u8 },
+    /// Arme ramassée au sol, avec les munitions qu'elle contenait.
+    /// `auto` : ramassée en passant dessus.
+    Picked { weapon: u8, mag: u16, reserve: u16, auto: bool },
     Chat { from: String, team: Option<Team>, text: String },
 }
 
@@ -194,6 +202,15 @@ pub struct AreaSnap {
 }
 
 /// Photo de l'état du jeu, envoyée 30 fois par seconde (non fiable).
+/// Arme posée au sol.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct DropSnap {
+    pub id: u16,
+    pub weapon: u8,
+    pub pos: Vec3,
+    pub yaw: f32,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Snapshot {
     pub time: f64,
@@ -206,4 +223,5 @@ pub struct Snapshot {
     pub players: Vec<PlayerSnap>,
     pub nades: Vec<NadeSnap>,
     pub areas: Vec<AreaSnap>,
+    pub drops: Vec<DropSnap>,
 }

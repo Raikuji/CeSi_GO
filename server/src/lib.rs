@@ -2,6 +2,7 @@
 //! client pour les parties locales contre des bots.
 
 mod bot;
+mod drops;
 mod game;
 mod nades;
 mod nav;
