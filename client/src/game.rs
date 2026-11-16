@@ -3,7 +3,8 @@
 
 use crate::audio::Audio;
 use crate::netclient::NetClient;
-use crate::render::{self, Batch, PlayerView, WorldRender};
+use crate::render::{self, Batch, PlayerView, Puppet, WorldRender};
+use crate::viewmodel::{self, ViewAnim};
 use crate::settings::{Action, Settings};
 use crate::ui;
 use cesi_common::map::MapInfo;
@@ -60,6 +61,7 @@ pub struct Corpse {
     yaw: f32,
     team: Team,
     t0: f64,
+    weapon: u8,
 }
 
 pub struct KillLine {
@@ -81,53 +83,49 @@ pub struct Game {
     pub my_id: Option<PlayerId>,
     pub cfg: MatchCfg,
     pub now: f64,
-    start: f64,
-    last_recv: f64,
+    pub start: f64,
+    pub last_recv: f64,
     pub snaps: VecDeque<Snapshot>,
-    time_offset: Option<f64>,
-    send_acc: f32,
-    send_n: u32,
+    pub time_offset: Option<f64>,
+    pub send_acc: f32,
+    pub send_n: u32,
     // Joueur local
     pub body: Body,
     pub yaw: f32,
     pub pitch: f32,
-    recoil: Vec2,
-    spray: f32,
-    last_shot: f64,
+    pub recoil: Vec2,
+    pub spray: f32,
+    pub last_shot: f64,
     pub slot: usize,
     pub ammo: [Ammo; 2],
-    refill: bool,
-    fire_cd: f32,
+    pub refill: bool,
+    pub fire_cd: f32,
     pub reload_t: f32,
-    draw_t: f32,
+    pub draw_t: f32,
     pub zoom: u8,
-    rescope: (f32, u8),
-    using: bool,
-    step_smooth: f32,
-    bob: f32,
-    kick: f32,
-    muzzle_t: f32,
+    pub rescope: (f32, u8),
+    pub using: bool,
+    pub step_smooth: f32,
+    pub muzzle_t: f32,
     /// Temps écoulé depuis le dernier coup de couteau, et s'il était puissant.
-    knife_t: f32,
-    knife_heavy: bool,
-    step_acc: f32,
+    pub knife_t: f32,
+    pub knife_heavy: bool,
     // Souris
     pub grab_frames: u32,
-    last_mouse: Vec2,
+    pub last_mouse: Vec2,
     // Monde
     pub views: Vec<PlayerView>,
-    anim: HashMap<PlayerId, f32>,
-    steps: HashMap<PlayerId, f32>,
-    alive_prev: HashMap<PlayerId, bool>,
-    particles: Vec<Particle>,
-    tracers: Vec<Tracer>,
-    corpses: Vec<Corpse>,
+    pub steps: HashMap<PlayerId, f32>,
+    pub alive_prev: HashMap<PlayerId, bool>,
+    pub particles: Vec<Particle>,
+    pub tracers: Vec<Tracer>,
+    pub corpses: Vec<Corpse>,
     pub spectate: Option<PlayerId>,
-    last_beep: f64,
+    pub last_beep: f64,
     // Caméra de la frame
     pub cam_pos: Vec3,
-    cam_yaw: f32,
-    cam_pitch: f32,
+    pub cam_yaw: f32,
+    pub cam_pitch: f32,
     pub cam_fovy: f32,
     // Interface
     pub overlay: Overlay,
@@ -135,6 +133,12 @@ pub struct Game {
     /// Diagnostic : 1 = tir automatique, 2 = tableau des scores, 4 = couteau en main,
     /// 8 = coup puissant automatique, 16 = animation du couteau figée (32 = coup puissant).
     pub debug: u8,
+    /// Diagnostic : arme affichée de force et progression de rechargement figée.
+    pub debug_weapon: u8,
+    pub debug_f: f32,
+    pub va: ViewAnim,
+    pub puppets: HashMap<PlayerId, Puppet>,
+    pub reload_stage: u8,
     pub chat_input: String,
     pub killfeed: Vec<KillLine>,
     pub chat: Vec<(String, Option<Team>, String, f64)>,
@@ -143,7 +147,7 @@ pub struct Game {
     pub hit_kill: bool,
     pub hurt_t: f32,
     pub flash_t: f32,
-    rng: Rng,
+    pub rng: Rng,
 }
 
 fn fovy_from(fov: f32) -> f32 {
@@ -185,16 +189,12 @@ impl Game {
             rescope: (0.0, 0),
             using: false,
             step_smooth: 0.0,
-            bob: 0.0,
-            kick: 0.0,
             muzzle_t: 0.0,
             knife_t: 9.0,
             knife_heavy: false,
-            step_acc: 0.0,
             grab_frames: 0,
             last_mouse: Vec2::ZERO,
             views: Vec::new(),
-            anim: HashMap::new(),
             steps: HashMap::new(),
             alive_prev: HashMap::new(),
             particles: Vec::new(),
@@ -209,6 +209,11 @@ impl Game {
             overlay: Overlay::None,
             overlay_since: 0.0,
             debug: 0,
+            debug_weapon: 0,
+            debug_f: 0.0,
+            va: ViewAnim::default(),
+            puppets: HashMap::new(),
+            reload_stage: 0,
             chat_input: String::new(),
             killfeed: Vec::new(),
             chat: Vec::new(),
@@ -257,14 +262,26 @@ impl Game {
 
     /// Achats possibles : pendant la préparation et le début du round.
     pub fn can_buy(&self) -> bool {
-        let Some(s) = self.snap() else { return false };
-        let alive = self.me().is_some_and(|m| m.alive);
-        let open = match s.phase {
-            Phase::Freeze => true,
-            Phase::Live => !matches!(s.bomb, BombState::Planted { .. }) && s.time_left > self.cfg.round_time - self.cfg.buy_time,
-            _ => false,
+        self.buy_time_left().is_some() && self.in_buy_zone()
+    }
+
+    /// Secondes restantes pour acheter, ou `None` si les achats sont fermés.
+    pub fn buy_time_left(&self) -> Option<f32> {
+        let s = self.snap()?;
+        if !self.me()?.alive {
+            return None;
+        }
+        let left = match s.phase {
+            Phase::Freeze => s.time_left + self.cfg.buy_time,
+            Phase::Live if !matches!(s.bomb, BombState::Planted { .. }) => s.time_left - (self.cfg.round_time - self.cfg.buy_time),
+            _ => return None,
         };
-        alive && open
+        (left > 0.0).then_some(left)
+    }
+
+    /// Vrai si le joueur se trouve dans la zone d'achat de son équipe.
+    pub fn in_buy_zone(&self) -> bool {
+        self.me().is_some_and(|m| self.info.in_buy_zone(m.team, self.body.pos))
     }
 
     pub fn has_bomb(&self) -> bool {
@@ -376,7 +393,8 @@ impl Game {
                 self.refill = true;
                 self.spectate = None;
             }
-            ServerMsg::Shot { weapon: wid, origin, end, hit_player, .. } => {
+            ServerMsg::Shot { shooter, weapon: wid, origin, end, hit_player } => {
+                self.puppets.entry(shooter).or_default().shot = 1.0;
                 audio.play_at(Audio::shot_name(weapon(wid).class), self.cam_pos, origin, 75.0, 0.9);
                 if wid != KNIFE {
                     let d = (end - origin).normalize_or_zero();
@@ -476,7 +494,7 @@ impl Game {
         });
         for p in &s.players {
             if self.alive_prev.insert(p.id, p.alive) == Some(true) && !p.alive {
-                self.corpses.push(Corpse { pos: p.pos, yaw: p.yaw, team: p.team, t0: self.now });
+                self.corpses.push(Corpse { pos: p.pos, yaw: p.yaw, team: p.team, t0: self.now, weapon: p.weapon });
             }
         }
         self.snaps.push_back(s);
@@ -503,7 +521,7 @@ impl Game {
             _ => None,
         };
         for p in &b.players {
-            let (mut pos, mut yaw, mut pitch, mut speed) = (p.pos, p.yaw, p.pitch, 0.0);
+            let (mut pos, mut yaw, mut pitch, mut speed, mut vel) = (p.pos, p.yaw, p.pitch, 0.0, Vec3::ZERO);
             if let Some(q) = a.players.iter().find(|q| q.id == p.id) {
                 if q.alive == p.alive && q.pos.distance(p.pos) < 4.0 {
                     pos = q.pos.lerp(p.pos, k);
@@ -511,6 +529,7 @@ impl Game {
                     pitch = q.pitch + (p.pitch - q.pitch) * k;
                     if span > 0.0 {
                         speed = hdist(q.pos, p.pos) / span;
+                        vel = (p.pos - q.pos) / span;
                     }
                 }
             }
@@ -519,16 +538,20 @@ impl Game {
                 team: p.team,
                 alive: p.alive,
                 pos,
+                vel,
                 yaw,
                 pitch,
                 crouch: p.crouch,
                 weapon: p.weapon,
                 has_bomb: carrier == Some(p.id),
                 speed,
+                reloading: p.reloading,
+                air: p.air,
+                action: p.action,
             });
         }
         for v in &self.views {
-            *self.anim.entry(v.id).or_insert(0.0) += v.speed * dt * 2.2;
+            self.puppets.entry(v.id).or_default().update(v, dt);
             // Bruits de pas des autres joueurs (course uniquement).
             if v.alive && Some(v.id) != self.my_id && v.speed > 3.0 {
                 let acc = self.steps.entry(v.id).or_insert(0.0);
@@ -560,8 +583,18 @@ impl Game {
             }
             return;
         }
-        self.kick = 1.0;
+        self.va.fired(&mut self.rng);
         audio.play(Audio::shot_name(def.class), 0.8);
+        // Douille éjectée sur la droite.
+        let vb = render::view_basis(origin, yaw, pitch);
+        let (right, up, fwd) = (vb.x_axis.truncate(), vb.y_axis.truncate(), vb.z_axis.truncate());
+        self.particles.push(Particle {
+            pos: vb.transform_point3(vec3(0.07, -0.05, 0.32)),
+            vel: self.body.vel + right * self.rng.range(1.6, 2.4) + up * self.rng.range(1.0, 1.8) + fwd * self.rng.range(-0.3, 0.3),
+            life: 0.7,
+            size: 0.011,
+            color: Color::new(0.85, 0.68, 0.25, 1.0),
+        });
         self.ammo[self.slot].mag -= 1;
         self.fire_cd = 60.0 / def.rpm;
         self.muzzle_t = 0.05;
@@ -618,7 +651,6 @@ impl Game {
         self.hitmarker_t -= dt;
         self.hurt_t -= dt;
         self.flash_t -= dt * 0.8;
-        self.kick = (self.kick - dt * 9.0).max(0.0);
         self.step_smooth *= (-14.0 * dt).exp();
         for p in &mut self.particles {
             p.vel.y -= 12.0 * dt;
@@ -686,16 +718,14 @@ impl Game {
             if self.body.pos.y < -20.0 {
                 self.body.pos = self.info.t_spawns[0].0;
             }
-            let hs = self.body.hspeed();
-            if self.body.on_ground {
-                self.bob += hs * dt * 1.9;
-                if hs > BASE_SPEED * 0.6 {
-                    self.step_acc += hs * dt;
-                    if self.step_acc > 2.3 {
-                        self.step_acc = 0.0;
-                        audio.play("step", 0.35);
-                    }
-                }
+            // Animation de l'arme en main ; les bruits de pas suivent le balancement.
+            let ev = self.va.update(&self.body, self.yaw, self.pitch, dt);
+            if ev.step && self.body.hspeed() > BASE_SPEED * 0.6 {
+                audio.play("step", 0.35);
+            }
+            if ev.landed > 3.0 {
+                audio.play("step", (ev.landed / 10.0).clamp(0.3, 0.9));
+                self.step_smooth -= (ev.landed * 0.012).min(0.12);
             }
 
             // Armes
@@ -719,6 +749,14 @@ impl Game {
             }
             let def = weapon(self.weapon_id());
             if self.reload_t > 0.0 {
+                // Bruitages calés sur les étapes de l'animation.
+                let r = 1.0 - self.reload_t / def.reload.max(0.1);
+                for (stage, at, name) in [(1u8, 0.16, "mag_out"), (2, 0.66, "mag_in"), (3, 0.80, "rack")] {
+                    if self.reload_stage < stage && r >= at {
+                        self.reload_stage = stage;
+                        audio.play(name, 0.55);
+                    }
+                }
                 self.reload_t -= dt;
                 if self.reload_t <= 0.0 && self.slot < 2 {
                     let a = &mut self.ammo[self.slot];
@@ -759,9 +797,19 @@ impl Game {
                         audio.play("click", 0.5);
                     }
                 }
-                if st.pressed(Action::Buy) && self.can_buy() {
-                    self.overlay = Overlay::Buy;
-                    self.overlay_since = self.now;
+                if st.pressed(Action::Buy) {
+                    if self.can_buy() {
+                        self.overlay = Overlay::Buy;
+                        self.overlay_since = self.now;
+                    } else {
+                        let why = if self.buy_time_left().is_some() {
+                            "Retournez dans la zone d'achat pour acheter"
+                        } else {
+                            "Le temps d'achat est écoulé"
+                        };
+                        self.center = Some((why.to_string(), self.now + 2.0, Color::new(1.0, 0.6, 0.4, 1.0)));
+                        audio.play("click", 0.4);
+                    }
                 }
                 if st.pressed(Action::Chat) {
                     self.overlay = Overlay::Chat;
@@ -774,7 +822,8 @@ impl Game {
                 self.recoil *= (-9.0 * dt).exp();
             }
             let (yaw, pitch) = self.view_angles();
-            self.cam_pos = self.body.eye() + Vec3::Y * self.step_smooth;
+            // Léger balancement de la caméra à chaque pas.
+            self.cam_pos = self.body.eye() + Vec3::Y * (self.step_smooth - self.va.phase.sin().abs() * 0.012 * self.va.amp);
             self.cam_yaw = yaw;
             self.cam_pitch = pitch;
             self.cam_fovy = fovy_from(if self.zoom > 0 { self.zoom_fov(def) } else { st.fov });
@@ -788,6 +837,8 @@ impl Game {
                     crouch: self.body.crouched,
                     weapon: self.weapon_id(),
                     using: self.using,
+                    reloading: self.reload_t > 0.0,
+                    air: !self.body.on_ground,
                 }),
             );
         } else {
@@ -845,7 +896,8 @@ impl Game {
         self.reload_t = def.reload;
         self.zoom = 0;
         self.rescope = (0.0, 0);
-        audio.play("reload", 0.5);
+        self.reload_stage = 0;
+        let _ = audio;
     }
 
     /// Envoie l'état au serveur, 60 fois par seconde au plus.
@@ -884,13 +936,14 @@ impl Game {
 
         let me_alive = self.me().is_some_and(|m| m.alive);
         let hidden = if me_alive { self.my_id } else { self.spectate };
+        let idle = Puppet::default();
         for v in &self.views {
             if v.alive && Some(v.id) != hidden {
-                render::draw_player(batch, v, self.anim.get(&v.id).copied().unwrap_or(0.0));
+                render::draw_player(batch, v, self.puppets.get(&v.id).unwrap_or(&idle));
             }
         }
         for c in &self.corpses {
-            render::draw_corpse(batch, c.pos, c.yaw, c.team, ((self.now - c.t0) / 0.45) as f32);
+            render::draw_corpse(batch, c.pos, c.yaw, c.team, ((self.now - c.t0) / 0.6) as f32, c.weapon);
         }
         match self.snap().map(|s| s.bomb) {
             Some(BombState::Planted { pos, .. }) | Some(BombState::Dropped(pos)) | Some(BombState::Defused(pos)) => {
@@ -908,66 +961,46 @@ impl Game {
         }
         batch.flush();
 
-        // Arme à la première personne (réduite et proche de l'œil pour ne pas traverser les murs).
-        if me_alive && self.zoom == 0 {
-            let def = weapon(self.weapon_id());
-            let moving = (self.body.hspeed() / BASE_SPEED).min(1.0);
-            let bob = vec3(self.bob.cos() * 0.012, -(self.bob * 2.0).sin().abs() * 0.012, 0.0) * moving;
-            let reload = if self.reload_t > 0.0 { ((1.0 - self.reload_t / def.reload.max(0.1)) * std::f32::consts::PI).sin() } else { 0.0 };
-            let lower = (self.draw_t.max(0.0) / 0.4) * 0.25 + reload * 0.16;
-            let vm = render::view_basis(eye, yaw, pitch)
-                * Mat4::from_scale(Vec3::splat(0.25))
-                * Mat4::from_translation(vec3(0.2, -0.2 - lower, 0.52 - self.kick * 0.05) + bob)
-                * Mat4::from_rotation_x(-self.kick * 0.07 + lower * 1.6);
-            let skin = Color::new(0.87, 0.68, 0.53, 1.0);
-            let sleeve = if self.me().is_some_and(|m| m.team == Team::T) { Color::from_rgba(196, 150, 78, 255) } else { Color::from_rgba(58, 88, 140, 255) };
-            if def.class == Class::Knife {
-                // Karambit : lame dressée, griffe vers l'avant, flanc tourné vers le joueur.
-                // Diagnostic (bits 16 et 32) : fige l'animation à mi-course pour les captures.
-                let frozen = self.debug & 16 != 0;
-                let heavy = if frozen { self.debug & 32 != 0 } else { self.knife_heavy };
-                let dur = if heavy { 0.55 } else { 0.32 };
-                let t = if frozen { 0.4 } else { (self.knife_t / dur).min(1.0) };
-                let s = if t < 1.0 { (t * std::f32::consts::PI).sin() } else { 0.0 };
-                let mut pos = vec3(0.19, -0.15 - lower, 0.46) + bob;
-                let (mut ry, mut rz, mut rx) = (-0.6, 0.0, -1.3 + lower * 1.6);
-                if t < 1.0 && heavy {
-                    // Coup puissant : la griffe plonge vers l'avant, au centre de l'écran.
-                    pos += vec3(-0.13 * s, 0.03 * s, 0.34 * s);
-                    rx += 0.45 * s;
-                    ry += 0.15 * s;
-                } else if t < 1.0 {
-                    // Coup rapide : balayage de droite à gauche puis retour.
-                    let x = if t < 0.6 { 0.1 - 0.42 * (t / 0.6) } else { -0.32 * (1.0 - (t - 0.6) / 0.4) };
-                    pos += vec3(x, -0.03 * s, 0.14 * s);
-                    rz -= 1.1 * s;
-                    rx += 0.35 * s;
-                }
-                let base = render::view_basis(eye, yaw, pitch) * Mat4::from_scale(Vec3::splat(0.25)) * Mat4::from_translation(pos);
-                let km = base * Mat4::from_rotation_y(ry) * Mat4::from_rotation_z(rz) * Mat4::from_rotation_x(rx) * Mat4::from_scale(Vec3::splat(1.2));
-                render::weapon_model(batch, &km, def.id);
-                batch.cube(&km, vec3(-0.032, -0.034, -0.05), vec3(0.032, 0.034, 0.04), skin);
-                batch.cube(&km, vec3(-0.034, -0.02, -0.03), vec3(0.0, 0.04, 0.03), skin);
-                let arm = base * Mat4::from_rotation_y(ry * 0.5) * Mat4::from_rotation_x(-0.45 + (rx + 1.3) * 0.4);
-                batch.cube(&arm, vec3(-0.04, -0.015, -0.6), vec3(0.045, 0.07, -0.06), sleeve);
-                batch.flush();
-                set_default_camera();
-                gl_use_default_material();
-                return;
-            }
-            render::weapon_model(batch, &vm, def.id);
-            // Main et avant-bras
-            batch.cube(&vm, vec3(-0.03, -0.14, -0.1), vec3(0.03, -0.02, -0.03), skin);
-            batch.cube(&vm, vec3(-0.04, -0.4, -0.3), vec3(0.06, -0.1, -0.08), sleeve);
-            if self.muzzle_t > 0.0 && def.class != Class::Knife {
-                let z = match def.class {
-                    Class::Pistol => 0.22,
-                    Class::Smg => 0.38,
-                    Class::Sniper => 0.98,
-                    _ => 0.72,
+        // Diagnostic (bit 64) : planche de poses devant la caméra.
+        if self.debug & 64 != 0 {
+            let flat = vec3(yaw.sin(), 0.0, yaw.cos());
+            let side = vec3(-yaw.cos(), 0.0, yaw.sin());
+            let w = if self.debug_weapon != 0 { self.debug_weapon } else { 7 };
+            let mk = |phase: f32, moving: f32, dir: f32, crouch: f32, air: f32, kneel: f32, reload: f32, shot: f32| Puppet { phase, moving, dir, crouch, air, kneel, reload, shot, ..Default::default() };
+            let sheet = [
+                (mk(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), w, Team::T),
+                (mk(0.4, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), w, Team::T),
+                (mk(1.9, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0), w, Team::CT),
+                (mk(1.0, 0.5, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0), w, Team::CT),
+                (mk(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0), w, Team::T),
+                (mk(0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0), 1, Team::CT),
+                (mk(0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0), w, Team::T),
+                (mk(0.8, 1.0, 1.57, 0.0, 0.0, 0.0, 0.0, 0.0), 0, Team::CT),
+            ];
+            for (i, (p, weapon_id, team)) in sheet.iter().enumerate() {
+                let pos = vec3(eye.x, self.body.pos.y, eye.z) + flat * 5.5 + side * ((i as f32 - 3.5) * 1.25);
+                let v = PlayerView {
+                    id: 250,
+                    team: *team,
+                    alive: true,
+                    pos,
+                    vel: Vec3::ZERO,
+                    yaw: yaw - 1.2,
+                    pitch: 0.0,
+                    crouch: p.crouch > 0.5,
+                    weapon: *weapon_id,
+                    has_bomb: false,
+                    speed: 0.0,
+                    reloading: false,
+                    air: false,
+                    action: 0,
                 };
-                batch.cube(&vm, vec3(-0.05, -0.02, z), vec3(0.05, 0.08, z + 0.12), Color::new(1.0, 0.9, 0.45, 1.0));
+                render::draw_player(batch, &v, p);
             }
+        }
+        batch.flush();
+        if me_alive && self.zoom == 0 {
+            viewmodel::draw(self, batch, eye, yaw, pitch);
             batch.flush();
         }
         set_default_camera();

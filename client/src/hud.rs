@@ -227,8 +227,8 @@ impl Game {
                 hint = Some(format!("Maintenez [{}] pour poser la bombe", use_key));
             } else if me.team == Team::CT && matches!(snap.bomb, BombState::Planted { pos, .. } if pos.distance(self.body.pos) < 1.8) {
                 hint = Some(format!("Maintenez [{}] pour désamorcer", use_key));
-            } else if self.can_buy() && self.overlay == Overlay::None {
-                hint = Some(format!("[{}] Acheter des armes", st.bind(Action::Buy).label()));
+            } else if let (Some(left), true, true) = (self.buy_time_left(), self.in_buy_zone(), self.overlay == Overlay::None) {
+                hint = Some(format!("[{}] Acheter des armes — encore {} s", st.bind(Action::Buy).label(), left.ceil()));
             }
             if let Some(t) = hint {
                 ui.shadow_px_c(&t, w / 2.0, h * 0.66, 18.0 * k, Color::new(1.0, 0.9, 0.5, 1.0));
@@ -304,11 +304,9 @@ impl Game {
         ui.text("ACHATS", 160.0, 108.0, 32.0, TEXT);
         ui.text_r(&format!("{} $", me.money), 1120.0, 108.0, 30.0, Color::new(0.55, 0.9, 0.45, 1.0));
         if let Some(s) = self.snap() {
-            let left = match s.phase {
-                Phase::Freeze => s.time_left + self.cfg.buy_time,
-                _ => s.time_left - (self.cfg.round_time - self.cfg.buy_time),
-            };
-            ui.text_c(&format!("Fermeture des achats dans {} s", left.max(0.0).ceil()), 640.0, 106.0, 16.0, DIM);
+            let _ = s;
+            let left = self.buy_time_left().unwrap_or(0.0);
+            ui.text_c(&format!("Fermeture des achats dans {} s — zone d'achat uniquement", left.ceil()), 640.0, 106.0, 16.0, DIM);
         }
 
         let groups: [(Class, f32, f32); 5] = [

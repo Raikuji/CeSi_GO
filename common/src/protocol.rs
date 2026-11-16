@@ -3,7 +3,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL: u16 = 2;
+pub const PROTOCOL: u16 = 3;
 pub const DEFAULT_PORT: u16 = 27500;
 pub const TICK_RATE: u32 = 60;
 
@@ -104,6 +104,9 @@ pub struct ClientState {
     pub weapon: u8,
     /// Touche « utiliser » maintenue (poser / désamorcer).
     pub using: bool,
+    /// Pour l'animation vue par les autres joueurs.
+    pub reloading: bool,
+    pub air: bool,
 }
 
 /// Messages fiables serveur -> client.
@@ -154,6 +157,9 @@ pub struct PlayerSnap {
     /// 0 rien, 1 pose la bombe, 2 désamorce.
     pub action: u8,
     pub progress: f32,
+    pub reloading: bool,
+    /// En l'air (saut ou chute).
+    pub air: bool,
 }
 
 /// Photo de l'état du jeu, envoyée 30 fois par seconde (non fiable).

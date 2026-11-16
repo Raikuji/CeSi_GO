@@ -10,6 +10,7 @@ mod netclient;
 mod render;
 mod settings;
 mod ui;
+mod viewmodel;
 
 use audio::Audio;
 use cesi_common::map;
@@ -219,7 +220,7 @@ async fn main() {
                     menu.screen = Screen::Settings;
                     menu.tab = ["options", "touches", "viseur"].iter().position(|m| m == mode).unwrap_or(0);
                 }
-                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" if game.is_none() && start.is_none() => {
+                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" if game.is_none() && start.is_none() => {
                     start = Some(true);
                     shot_at = Some(get_time() + 9.0);
                 }
@@ -227,11 +228,17 @@ async fn main() {
             }
         }
         if let (Some((mode, _)), Some(g)) = (&shot, game.as_mut()) {
+            // « vm » : --shot vm <fichier> --vm <arme> <progression du rechargement>
+            if let Some(i) = args.iter().position(|a| a == "--vm") {
+                g.debug_weapon = args.get(i + 1).and_then(|a| a.parse().ok()).unwrap_or(0);
+                g.debug_f = args.get(i + 2).and_then(|a| a.parse().ok()).unwrap_or(0.0);
+            }
             if mode == "achats" && g.can_buy() {
                 g.overlay = Overlay::Buy;
             }
             g.debug = match mode.as_str() {
                 "tir" => 1,
+                "poses" => 64,
                 "couteau" => 4,
                 "coup" => 4 | 16,
                 "coup2" => 4 | 16 | 32,

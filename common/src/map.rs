@@ -1,6 +1,7 @@
 //! Carte « Comptoir » : trois couloirs, deux sites de bombe (A et B).
 //! La carte est générée par le code, à l'identique sur le client et le serveur.
 
+use crate::protocol::Team;
 use crate::voxel::*;
 use glam::{vec3, Vec3};
 use std::f32::consts::PI;
@@ -41,11 +42,19 @@ pub struct MapInfo {
     pub ct_spawns: Vec<(Vec3, f32)>,
     /// Zones de pose de la bombe : A puis B (min, max).
     pub sites: [(Vec3, Vec3); 2],
+    /// Zones d'achat : Attaquants puis Défenseurs (min, max).
+    pub buy_zones: [(Vec3, Vec3); 2],
 }
 
 impl MapInfo {
     pub fn site_of(&self, p: Vec3) -> Option<u8> {
         self.sites.iter().position(|(a, b)| in_aabb(p, *a, *b)).map(|i| i as u8)
+    }
+
+    /// Vrai si `p` est dans la zone d'achat de l'équipe (autour de son point de départ).
+    pub fn in_buy_zone(&self, team: Team, p: Vec3) -> bool {
+        let (a, b) = self.buy_zones[if team == Team::T { 0 } else { 1 }];
+        in_aabb(p, a, b)
     }
 }
 
@@ -190,6 +199,10 @@ pub fn build() -> (World, MapInfo) {
     w.fill(34, 4, 116, 34, 4, 119, CONCRETE);
     w.fill(34, 4, 84, 37, 6, 87, BLUE);
 
+    // --- Zones d'achat, délimitées par une ligne blanche au sol ---
+    outline(&mut w, 24, 8, 103, 31, 3, WHITE);
+    outline(&mut w, 48, 96, 79, 119, 3, WHITE);
+
     let info = MapInfo {
         name: "Comptoir",
         t_spawns,
@@ -197,6 +210,10 @@ pub fn build() -> (World, MapInfo) {
         sites: [
             (vec3(44.0, 2.8, 46.0), vec3(60.0, 5.6, 60.0)),
             (vec3(4.0, 1.8, 44.0), vec3(20.0, 4.6, 60.0)),
+        ],
+        buy_zones: [
+            (vec3(12.0, 1.5, 4.0), vec3(52.0, 6.0, 16.0)),
+            (vec3(24.0, 1.5, 48.0), vec3(40.0, 6.0, 60.0)),
         ],
     };
     (w, info)

@@ -105,6 +105,8 @@ pub struct Player {
     pub primary: u8,
     pub secondary: u8,
     pub using: bool,
+    pub reloading: bool,
+    pub air: bool,
     pub action: u8,
     pub progress: f32,
     action_pos: Vec3,
@@ -139,6 +141,8 @@ impl Player {
             primary: 0,
             secondary: DEFAULT_PISTOL,
             using: false,
+            reloading: false,
+            air: false,
             action: 0,
             progress: 0.0,
             action_pos: Vec3::ZERO,
@@ -496,6 +500,8 @@ impl Server {
         p.pitch = st.pitch.clamp(-1.57, 1.57);
         p.crouch = st.crouch;
         p.using = st.using;
+        p.reloading = st.reloading;
+        p.air = st.air;
         p.weapon = if st.weapon != 0 && (st.weapon == p.primary || st.weapon == p.secondary) { st.weapon } else { KNIFE };
         if p.alive && !frozen {
             p.pos = st.pos;
@@ -597,6 +603,8 @@ impl Server {
                     deaths: p.deaths,
                     action: p.action,
                     progress: p.progress,
+                    reloading: p.reloading,
+                    air: p.air,
                 })
                 .collect(),
         };
@@ -988,6 +996,10 @@ impl Server {
         if !self.can_buy() {
             return false;
         }
+        // Achats réservés à la zone de départ de l'équipe.
+        if !self.info.in_buy_zone(self.players[i].team, self.players[i].pos) {
+            return false;
+        }
         let p = &mut self.players[i];
         if !p.alive {
             return false;
@@ -1106,6 +1118,8 @@ impl Server {
             p.crouch = bot.body.crouched;
             p.weapon = out.weapon;
             p.using = out.using;
+            p.reloading = bot.reloading();
+            p.air = !bot.body.on_ground;
             p.bot = Some(bot);
             if let Some(s) = out.shot {
                 shots.push((i, s));

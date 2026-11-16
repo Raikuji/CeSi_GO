@@ -134,6 +134,10 @@ impl Bot {
         self.stuck_pos = pos;
     }
 
+    pub fn reloading(&self) -> bool {
+        self.reload_t > 0.0
+    }
+
     /// Position de l'ennemi que ce bot voit en ce moment (partagée avec son équipe).
     pub fn spotted(&self) -> Option<Vec3> {
         if self.visible {
