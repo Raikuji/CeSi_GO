@@ -27,6 +27,20 @@ Deux exécutables sont produits dans `target/release/` :
 Les réglages (touches, sensibilité, viseur) se trouvent dans **Options** et
 sont enregistrés dans `%APPDATA%\CeSi_GO\settings.json`.
 
+## Grenades
+
+Quatre grenades s'achètent dans le menu d'achat (quatre au maximum, une de
+chaque type, deux aveuglantes). La touche `4` prend une grenade en main, puis
+passe au type suivant ; clic gauche pour un lancer long, clic droit pour un
+lancer court.
+
+| Grenade | Prix | Effet |
+| --- | --- | --- |
+| Fragmentation | 300 $ | Explose après 1,8 s, jusqu'à 105 dégâts dans un rayon de 7,5 m |
+| Fumigène | 300 $ | Nuage opaque pendant 15 s, éteint les flammes |
+| Aveuglante | 200 $ | Aveugle ceux qui la regardent exploser, alliés compris |
+| Incendiaire | 500 $ | S'enflamme au sol pendant 7 s, brûle ceux qui traversent |
+
 ## Serveur
 
 Au premier lancement, `server.json` est créé à côté de l'exécutable

@@ -220,9 +220,9 @@ async fn main() {
                     menu.screen = Screen::Settings;
                     menu.tab = ["options", "touches", "viseur"].iter().position(|m| m == mode).unwrap_or(0);
                 }
-                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" if game.is_none() && start.is_none() => {
+                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" | "nade" | "main" if game.is_none() && start.is_none() => {
                     start = Some(true);
-                    shot_at = Some(get_time() + 9.0);
+                    shot_at = Some(get_time() + if mode == "nade" { 11.5 } else { 9.0 });
                 }
                 _ => {}
             }
@@ -233,12 +233,17 @@ async fn main() {
                 g.debug_weapon = args.get(i + 1).and_then(|a| a.parse().ok()).unwrap_or(0);
                 g.debug_f = args.get(i + 2).and_then(|a| a.parse().ok()).unwrap_or(0.0);
             }
+            // « nade » : --shot nade <fichier> --nade <type> achète et lance la grenade.
+            if let Some(i) = args.iter().position(|a| a == "--nade") {
+                g.debug_nade = args.get(i + 1).and_then(|a| a.parse().ok());
+            }
             if mode == "achats" && g.can_buy() {
                 g.overlay = Overlay::Buy;
             }
             g.debug = match mode.as_str() {
                 "tir" => 1,
                 "poses" => 64,
+                "main" => 128,
                 "couteau" => 4,
                 "coup" => 4 | 16,
                 "coup2" => 4 | 16 | 32,

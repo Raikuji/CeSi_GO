@@ -1,8 +1,10 @@
 //! Serveur de jeu : connexions, rounds, économie, bombe, tirs et bots.
 
 use crate::bot::{Bot, BotCtx};
+use crate::nades::{Area, Nade};
 use crate::nav::Nav;
 use cesi_common::glam::{vec3, Vec3};
+use cesi_common::grenades::*;
 use cesi_common::map::{self, MapInfo};
 use cesi_common::net::Channel;
 use cesi_common::physics::eye_height;
@@ -107,6 +109,8 @@ pub struct Player {
     pub using: bool,
     pub reloading: bool,
     pub air: bool,
+    /// Grenades possédées, par type.
+    pub nades: [u8; 4],
     pub action: u8,
     pub progress: f32,
     action_pos: Vec3,
@@ -143,6 +147,7 @@ impl Player {
             using: false,
             reloading: false,
             air: false,
+            nades: [0; 4],
             action: 0,
             progress: 0.0,
             action_pos: Vec3::ZERO,
@@ -172,37 +177,40 @@ impl Player {
     }
 }
 
-struct Conn {
+pub(crate) struct Conn {
     pid: PlayerId,
     chan: Channel<ServerMsg>,
     last_recv: f64,
 }
 
 pub struct Server {
-    cfg: ServerConfig,
-    cfg_path: Option<PathBuf>,
-    socket: UdpSocket,
-    world: World,
-    info: MapInfo,
-    nav: Nav,
-    rng: Rng,
-    log: Box<dyn Fn(&str) + Send>,
-    players: Vec<Player>,
-    conns: HashMap<SocketAddr, Conn>,
-    time: f64,
-    tick: u64,
-    phase: Phase,
-    timer: f32,
-    round: u16,
-    round_elapsed: f32,
-    score_t: u16,
-    score_ct: u16,
-    loss_t: u32,
-    loss_ct: u32,
-    half_swapped: bool,
-    bomb: BombState,
-    t_site: u8,
-    quit: bool,
+    pub(crate) cfg: ServerConfig,
+    pub(crate) cfg_path: Option<PathBuf>,
+    pub(crate) socket: UdpSocket,
+    pub(crate) world: World,
+    pub(crate) info: MapInfo,
+    pub(crate) nav: Nav,
+    pub(crate) rng: Rng,
+    pub(crate) log: Box<dyn Fn(&str) + Send>,
+    pub(crate) players: Vec<Player>,
+    pub(crate) conns: HashMap<SocketAddr, Conn>,
+    pub(crate) time: f64,
+    pub(crate) tick: u64,
+    pub(crate) phase: Phase,
+    pub(crate) timer: f32,
+    pub(crate) round: u16,
+    pub(crate) round_elapsed: f32,
+    pub(crate) score_t: u16,
+    pub(crate) score_ct: u16,
+    pub(crate) loss_t: u32,
+    pub(crate) loss_ct: u32,
+    pub(crate) half_swapped: bool,
+    pub(crate) bomb: BombState,
+    pub(crate) t_site: u8,
+    pub(crate) quit: bool,
+    pub(crate) nades: Vec<Nade>,
+    pub(crate) areas: Vec<Area>,
+    pub(crate) next_nade: u16,
 }
 
 /// Intersection rayon / boîte ; renvoie la distance d'entrée.
@@ -282,6 +290,9 @@ impl Server {
             bomb: BombState::None,
             t_site: 0,
             quit: false,
+            nades: Vec::new(),
+            areas: Vec::new(),
+            next_nade: 0,
         })
     }
 
@@ -289,7 +300,7 @@ impl Server {
         self.socket.local_addr().map(|a| a.port()).unwrap_or(self.cfg.port)
     }
 
-    fn say(&self, s: &str) {
+    pub(crate) fn say(&self, s: &str) {
         (self.log)(&format!("[{}] {}", clock(self.time), s));
     }
 
@@ -435,17 +446,17 @@ impl Server {
         (0..=250u8).find(|i| self.players.iter().all(|p| p.id != *i)).unwrap_or(250)
     }
 
-    fn idx(&self, id: PlayerId) -> Option<usize> {
+    pub(crate) fn idx(&self, id: PlayerId) -> Option<usize> {
         self.players.iter().position(|p| p.id == id)
     }
 
-    fn send_to(&mut self, pid: PlayerId, msg: ServerMsg) {
+    pub(crate) fn send_to(&mut self, pid: PlayerId, msg: ServerMsg) {
         if let Some(c) = self.conns.values_mut().find(|c| c.pid == pid) {
             c.chan.send_reliable(msg);
         }
     }
 
-    fn broadcast(&mut self, msg: ServerMsg) {
+    pub(crate) fn broadcast(&mut self, msg: ServerMsg) {
         for c in self.conns.values_mut() {
             c.chan.send_reliable(msg.clone());
         }
@@ -502,7 +513,8 @@ impl Server {
         p.using = st.using;
         p.reloading = st.reloading;
         p.air = st.air;
-        p.weapon = if st.weapon != 0 && (st.weapon == p.primary || st.weapon == p.secondary) { st.weapon } else { KNIFE };
+        let holds_nade = is_grenade(st.weapon) && p.nades[(st.weapon - GRENADE_BASE) as usize] > 0;
+        p.weapon = if st.weapon != 0 && (st.weapon == p.primary || st.weapon == p.secondary || holds_nade) { st.weapon } else { KNIFE };
         if p.alive && !frozen {
             p.pos = st.pos;
         }
@@ -537,6 +549,7 @@ impl Server {
                 let rt = if render_time.is_finite() { render_time.clamp(time - 0.4, time) } else { time };
                 self.apply_shot(i, origin, dir.normalize(), wid, rt, if heavy { KNIFE_HEAVY_MULT } else { 1.0 });
             }
+            ClientMsg::Throw { kind, origin, dir, strong } => self.throw_nade(i, kind, origin, dir, strong),
             ClientMsg::Buy(item) => {
                 self.try_buy(i, item);
             }
@@ -605,8 +618,11 @@ impl Server {
                     progress: p.progress,
                     reloading: p.reloading,
                     air: p.air,
+                    nades: p.nades,
                 })
                 .collect(),
+            nades: self.nades.iter().map(|n| NadeSnap { id: n.id, kind: n.kind, pos: n.pos }).collect(),
+            areas: self.areas.iter().map(|a| AreaSnap { id: a.id, kind: a.kind, pos: a.pos, time_left: a.time_left }).collect(),
         };
         for (addr, c) in self.conns.iter() {
             let _ = self.socket.send_to(&c.chan.build(Some(&snap)), addr);
@@ -685,6 +701,7 @@ impl Server {
         p.armor = 0;
         p.helmet = false;
         p.kit = false;
+        p.nades = [0; 4];
         p.fresh = false;
     }
 
@@ -730,6 +747,8 @@ impl Server {
         }
         self.balance_bots();
         self.bomb = BombState::None;
+        self.nades.clear();
+        self.areas.clear();
         self.t_site = self.rng.below(2) as u8;
         for i in 0..self.players.len() {
             if !self.players[i].alive || self.players[i].fresh {
@@ -853,9 +872,11 @@ impl Server {
                     self.timer -= dt;
                 }
                 self.update_bomb(dt);
+                self.update_nades(dt);
                 self.check_win();
             }
             Phase::RoundEnd => {
+                self.update_nades(dt);
                 self.timer -= dt;
                 if self.timer <= 0.0 {
                     self.after_round();
@@ -1036,6 +1057,15 @@ impl Server {
                 p.helmet = true;
                 p.money -= price;
             }
+            BuyItem::Grenade(k) => {
+                let Some(g) = GRENADES.get(k as usize) else { return false };
+                let total: u8 = p.nades.iter().sum();
+                if p.nades[k as usize] >= g.max || total >= MAX_GRENADES || p.money < g.price {
+                    return false;
+                }
+                p.nades[k as usize] += 1;
+                p.money -= g.price;
+            }
             BuyItem::Kit => {
                 if p.team != Team::CT || p.kit || p.money < PRICE_KIT {
                     return false;
@@ -1082,6 +1112,12 @@ impl Server {
         if self.players[i].team == Team::CT && self.players[i].money >= 1200 {
             self.try_buy(i, BuyItem::Kit);
         }
+        // Quelques grenades quand il reste de l'argent.
+        for (kind, chance) in [(FRAG, 0.4), (FLASH, 0.3), (FIRE, 0.15)] {
+            if self.players[i].money >= 1000 && self.rng.chance(chance) {
+                self.try_buy(i, BuyItem::Grenade(kind));
+            }
+        }
     }
 
     fn update_bots(&mut self, dt: f32) {
@@ -1091,6 +1127,9 @@ impl Server {
             players.iter().filter(|p| p.alive && p.team == team).find_map(|p| p.bot.as_ref().and_then(|b| b.spotted()))
         };
         let (alert_t, alert_ct) = (alert(Team::T, &self.players), alert(Team::CT, &self.players));
+        let smokes: Vec<Vec3> = self.areas.iter().filter(|a| a.kind == SMOKE).map(|a| a.pos).collect();
+        let fires: Vec<Vec3> = self.areas.iter().filter(|a| a.kind == FIRE).map(|a| a.pos).collect();
+        let mut throws = Vec::new();
         for i in 0..self.players.len() {
             if !self.players[i].alive {
                 continue;
@@ -1107,6 +1146,8 @@ impl Server {
                     bomb: self.bomb,
                     t_site: self.t_site,
                     alert: if self.players[i].team == Team::T { alert_t } else { alert_ct },
+                    smokes: &smokes,
+                    fires: &fires,
                     dt,
                 };
                 bot.update(&ctx, &mut self.rng)
@@ -1124,6 +1165,12 @@ impl Server {
             if let Some(s) = out.shot {
                 shots.push((i, s));
             }
+            if let Some(t) = out.throw {
+                throws.push((i, t));
+            }
+        }
+        for (i, (kind, origin, dir)) in throws {
+            self.throw_nade(i, kind, origin, dir, true);
         }
         let time = self.time;
         for (i, (origin, dir, wid)) in shots {
@@ -1172,7 +1219,7 @@ impl Server {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn damage(&mut self, victim: usize, attacker: Option<usize>, dmg: f32, pen: f32, group: u8, wid: u8, hit_pos: Vec3) {
+    pub(crate) fn damage(&mut self, victim: usize, attacker: Option<usize>, dmg: f32, pen: f32, group: u8, wid: u8, hit_pos: Vec3) {
         let from = attacker.map_or(hit_pos, |a| self.players[a].pos);
         let v = &mut self.players[victim];
         let head = group == 0;
@@ -1219,13 +1266,14 @@ impl Server {
         if let Some(a) = attacker {
             let p = &mut self.players[a];
             p.kills += 1;
-            p.money = (p.money + weapon(wid).kill_reward).min(MONEY_MAX);
+            let reward = if is_grenade(wid) { 300 } else { weapon(wid).kill_reward };
+            p.money = (p.money + reward).min(MONEY_MAX);
             killer = Some(p.id);
             let msg = format!(
                 "{} a éliminé {} ({}{})",
                 p.name,
                 vname,
-                weapon(wid).name,
+                item_name(wid),
                 if headshot { ", tir à la tête" } else { "" }
             );
             self.say(&msg);

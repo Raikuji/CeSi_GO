@@ -119,5 +119,6 @@ pub const WEAPONS: [WeaponDef; 13] = [
 ];
 
 pub fn weapon(id: u8) -> &'static WeaponDef {
-    &WEAPONS[(id as usize).min(WEAPONS.len() - 1)]
+    // Identifiant inconnu (grenade en main, par exemple) : caractéristiques du couteau.
+    WEAPONS.get(id as usize).unwrap_or(&WEAPONS[0])
 }

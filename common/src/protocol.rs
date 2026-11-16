@@ -3,7 +3,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL: u16 = 3;
+pub const PROTOCOL: u16 = 4;
 pub const DEFAULT_PORT: u16 = 27500;
 pub const TICK_RATE: u32 = 60;
 
@@ -68,6 +68,8 @@ pub enum BuyItem {
     Kevlar,
     KevlarHelmet,
     Kit,
+    /// Type de grenade (voir `grenades`).
+    Grenade(u8),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -89,6 +91,8 @@ pub enum ClientMsg {
     /// `heavy` : coup de couteau puissant (clic droit).
     Fire { weapon: u8, origin: Vec3, dir: Vec3, render_time: f64, heavy: bool },
     Buy(BuyItem),
+    /// Lancer de grenade ; `strong` : lancer long (sinon lancer court).
+    Throw { kind: u8, origin: Vec3, dir: Vec3, strong: bool },
     SwitchTeam,
     Chat(String),
 }
@@ -128,6 +132,10 @@ pub enum ServerMsg {
     BombPlanted { site: u8 },
     BombDefused,
     BombExploded { pos: Vec3 },
+    /// Une grenade vient d'exploser ou de se déclencher.
+    Detonate { kind: u8, pos: Vec3 },
+    /// Le joueur est aveuglé pendant `duration` secondes.
+    Flashed { duration: f32 },
     MatchEnd { winner: Option<Team> },
     Chat { from: String, team: Option<Team>, text: String },
 }
@@ -160,6 +168,25 @@ pub struct PlayerSnap {
     pub reloading: bool,
     /// En l'air (saut ou chute).
     pub air: bool,
+    /// Grenades possédées, par type.
+    pub nades: [u8; 4],
+}
+
+/// Grenade en vol.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct NadeSnap {
+    pub id: u16,
+    pub kind: u8,
+    pub pos: Vec3,
+}
+
+/// Zone d'effet au sol : fumée ou flammes.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct AreaSnap {
+    pub id: u16,
+    pub kind: u8,
+    pub pos: Vec3,
+    pub time_left: f32,
 }
 
 /// Photo de l'état du jeu, envoyée 30 fois par seconde (non fiable).
@@ -173,4 +200,6 @@ pub struct Snapshot {
     pub score_ct: u16,
     pub bomb: BombState,
     pub players: Vec<PlayerSnap>,
+    pub nades: Vec<NadeSnap>,
+    pub areas: Vec<AreaSnap>,
 }

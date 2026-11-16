@@ -1,6 +1,7 @@
 //! Code partagé entre le client et le serveur : monde voxel, carte, armes,
 //! physique du joueur et protocole réseau.
 
+pub mod grenades;
 pub mod map;
 pub mod net;
 pub mod physics;

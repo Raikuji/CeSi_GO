@@ -1,6 +1,7 @@
 //! Rendu 3D : maillage du monde voxel (fusion des faces + occlusion ambiante),
 //! shader, et modèles en boîtes des joueurs, des armes et de la bombe.
 
+use cesi_common::grenades::*;
 use cesi_common::{angle_diff, dir_from_angles};
 use cesi_common::protocol::Team;
 use cesi_common::voxel::{block_color, World, VOID, VS};
@@ -9,7 +10,7 @@ use macroquad::prelude::*;
 
 pub const SKY: Color = Color::new(0.56, 0.74, 0.92, 1.0);
 
-const VERT: &str = r#"#version 100
+const VERT_SRC: &str = r#"#version 100
 attribute vec3 position;
 attribute vec2 texcoord;
 attribute vec4 color0;
@@ -28,7 +29,7 @@ void main() {
 
 // uv.x >= 0 : face du monde (indice de la normale) -> grain et joints par voxel.
 // uv.x < 0  : objet dynamique, couleur unie.
-const FRAG: &str = r#"#version 100
+const FRAG_SRC: &str = r#"#version 100
 precision highp float;
 varying lowp vec4 color;
 varying vec2 uv;
@@ -210,7 +211,7 @@ fn mesh_chunk(w: &World, lo: [i32; 3], hi: [i32; 3], mb: &mut MeshBuilder) {
 impl WorldRender {
     pub fn new(world: &World) -> WorldRender {
         let material = load_material(
-            ShaderSource::Glsl { vertex: VERT, fragment: FRAG },
+            ShaderSource::Glsl { vertex: VERT_SRC, fragment: FRAG_SRC },
             MaterialParams {
                 pipeline_params: PipelineParams {
                     depth_write: true,
@@ -742,9 +743,81 @@ fn karambit(b: &mut Batch, m: &Mat4) {
     }
 }
 
+/// Grenade : petit cylindre en boîtes, aux couleurs de son type.
+pub fn grenade_model(b: &mut Batch, m: &Mat4, kind: u8) {
+    let cap = rgb(96, 100, 112);
+    let (body, band) = match kind {
+        FRAG => (rgb(74, 92, 58), rgb(52, 64, 42)),
+        SMOKE => (rgb(120, 124, 128), rgb(232, 232, 232)),
+        FLASH => (rgb(176, 184, 196), rgb(60, 110, 190)),
+        _ => (rgb(170, 48, 40), rgb(240, 150, 40)),
+    };
+    if kind == FRAG {
+        b.cube(m, vec3(-0.042, -0.05, -0.042), vec3(0.042, 0.04, 0.042), body);
+        b.cube(m, vec3(-0.046, -0.02, -0.046), vec3(0.046, 0.0, 0.046), band);
+    } else {
+        b.cube(m, vec3(-0.036, -0.07, -0.036), vec3(0.036, 0.05, 0.036), body);
+        b.cube(m, vec3(-0.038, -0.03, -0.038), vec3(0.038, 0.0, 0.038), band);
+    }
+    b.cube(m, vec3(-0.02, 0.04, -0.02), vec3(0.02, 0.075, 0.02), cap);
+    b.cube(m, vec3(0.02, -0.03, -0.012), vec3(0.034, 0.08, 0.012), cap);
+}
+
+fn hash(a: i32, b: i32, c: i32, seed: u32) -> f32 {
+    let mut h = (a as u32).wrapping_mul(374_761_393) ^ (b as u32).wrapping_mul(668_265_263) ^ (c as u32).wrapping_mul(2_147_483_647) ^ seed.wrapping_mul(0x9E37_79B9);
+    h = (h ^ (h >> 13)).wrapping_mul(1_274_126_177);
+    ((h ^ (h >> 16)) & 0xFFFF) as f32 / 65535.0
+}
+
+/// Nuage de fumée : cubes gris qui se chevauchent sur une grille, opaque de l'intérieur
+/// comme de l'extérieur. Il gonfle à l'apparition puis s'amenuise en fin de vie.
+pub fn draw_smoke(b: &mut Batch, id: u16, pos: Vec3, time_left: f32, t: f32) {
+    let grow = ss(0.0, 1.4, SMOKE_TIME - time_left);
+    let fade = ss(0.0, 2.5, time_left);
+    let r = SMOKE_RADIUS * (0.25 + 0.75 * grow);
+    for iy in 0..=3 {
+        for iz in -3..=3 {
+            for ix in -3..=3 {
+                let (h1, h2, h3) = (hash(ix, iy, iz, id as u32), hash(iz, ix, iy, id as u32 + 7), hash(iy, iz, ix, id as u32 + 13));
+                let p = vec3(ix as f32 + (h1 - 0.5) * 0.5, iy as f32 * 0.95 + 0.35 + (h2 - 0.5) * 0.4, iz as f32 + (h3 - 0.5) * 0.5);
+                if vec3(p.x, p.y * 1.15, p.z).length() > r {
+                    continue;
+                }
+                let drift = vec3((t * 0.45 + h1 * 6.28).sin(), (t * 0.33 + h2 * 6.28).sin() * 0.6, (t * 0.4 + h3 * 6.28).cos()) * 0.12;
+                let s = (0.56 + 0.16 * h2) * (0.35 + 0.65 * grow) * (0.25 + 0.75 * fade);
+                let g = 0.6 + 0.2 * h3;
+                b.cube(&Mat4::from_translation(pos + p + drift), Vec3::splat(-s), Vec3::splat(s), Color::new(g, g, g * 1.02, 1.0));
+            }
+        }
+    }
+}
+
+/// Flammes : colonnes vacillantes posées sur le sol dans le rayon de l'incendie.
+pub fn draw_fire(b: &mut Batch, world: &World, id: u16, pos: Vec3, time_left: f32, t: f32) {
+    let fade = ss(0.0, 1.2, time_left) * ss(0.0, 0.4, FIRE_TIME - time_left);
+    for i in 0..46 {
+        let (h1, h2, h3) = (hash(i, 1, 0, id as u32), hash(i, 2, 0, id as u32), hash(i, 3, 0, id as u32));
+        let (a, rr) = (h1 * std::f32::consts::TAU, FIRE_RADIUS * h2.sqrt());
+        let (x, z) = (pos.x + a.cos() * rr, pos.z + a.sin() * rr);
+        let Some(hit) = world.raycast(vec3(x, pos.y + 1.2, z), Vec3::NEG_Y, 3.0) else { continue };
+        let y = pos.y + 1.2 - hit.dist;
+        let flick = (t * (7.0 + h3 * 6.0) + h1 * 20.0).sin() * 0.5 + 0.5;
+        let hgt = (0.3 + 0.7 * flick) * (0.6 + 0.9 * h3) * fade * (1.3 - 0.6 * rr / FIRE_RADIUS);
+        let w = 0.11 + 0.11 * h2;
+        let m = Mat4::from_translation(vec3(x, y, z));
+        b.cube(&m, vec3(-w, 0.0, -w), vec3(w, hgt * 0.62, w), Color::new(1.0, 0.42 + 0.2 * h3, 0.08, 1.0));
+        b.cube(&m, vec3(-w * 0.55, hgt * 0.5, -w * 0.55), vec3(w * 0.55, hgt, w * 0.55), Color::new(1.0, 0.86, 0.3, 1.0));
+        b.cube(&m, vec3(-w * 1.25, 0.0, -w * 1.25), vec3(w * 1.25, 0.01, w * 1.25), Color::new(0.16, 0.12, 0.1, 1.0));
+    }
+}
+
 /// Arme en boîtes ; origine à la poignée, +Z vers le canon, unités en mètres.
 /// `pose` déplace le chargeur et la culasse (rechargement, tir).
 pub fn weapon_model(b: &mut Batch, m: &Mat4, id: u8, pose: &WeaponPose) {
+    if is_grenade(id) {
+        grenade_model(b, &(*m * Mat4::from_translation(vec3(0.0, 0.04, 0.0)) * Mat4::from_scale(Vec3::splat(1.2))), id - GRENADE_BASE);
+        return;
+    }
     let def = weapon(id);
     if def.class == Class::Knife {
         karambit(b, m);

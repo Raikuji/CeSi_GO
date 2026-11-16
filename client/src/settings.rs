@@ -24,11 +24,12 @@ pub enum Action {
     Primary,
     Secondary,
     Knife,
+    Grenade,
     Chat,
 }
 
 /// (action, identifiant dans le fichier, libellé du menu)
-pub const ACTIONS: [(Action, &str, &str); 17] = [
+pub const ACTIONS: [(Action, &str, &str); 18] = [
     (Action::Forward, "forward", "Avancer"),
     (Action::Back, "back", "Reculer"),
     (Action::Left, "left", "Gauche"),
@@ -45,6 +46,7 @@ pub const ACTIONS: [(Action, &str, &str); 17] = [
     (Action::Primary, "primary", "Arme principale"),
     (Action::Secondary, "secondary", "Pistolet"),
     (Action::Knife, "knife", "Couteau"),
+    (Action::Grenade, "grenade", "Grenades (changer de type)"),
     (Action::Chat, "chat", "Discussion"),
 ];
 
@@ -121,6 +123,7 @@ fn default_bind(a: Action) -> Bind {
         Action::Primary => Bind::Key(KeyCode::Key1),
         Action::Secondary => Bind::Key(KeyCode::Key2),
         Action::Knife => Bind::Key(KeyCode::Key3),
+        Action::Grenade => Bind::Key(KeyCode::Key4),
         Action::Chat => Bind::Key(KeyCode::Y),
     }
 }

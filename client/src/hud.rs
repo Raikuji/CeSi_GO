@@ -5,6 +5,8 @@ use crate::audio::Audio;
 use crate::game::{Game, Overlay, Status};
 use crate::settings::{Action, Crosshair, Settings};
 use crate::ui::{Ui, ACCENT, CT_COLOR, DIM, PANEL, TEXT, T_COLOR, WIDGET, WIDGET_HOT};
+use crate::render::ss;
+use cesi_common::grenades::*;
 use cesi_common::protocol::*;
 use cesi_common::weapons::*;
 use macroquad::prelude::*;
@@ -99,6 +101,20 @@ impl Game {
             }
         }
 
+        // --- Fumée : écran gris quand la caméra est dans le nuage ---
+        for a in snap.areas.iter().filter(|a| a.kind == SMOKE) {
+            let d = self.cam_pos.distance(a.pos + Vec3::Y * 1.2);
+            let dense = ss(0.0, 1.4, SMOKE_TIME - a.time_left) * ss(0.0, 2.5, a.time_left);
+            let alpha = (1.0 - ss(1.9, 2.9, d)) * dense * 0.96;
+            if alpha > 0.01 {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.66, 0.66, 0.68, alpha));
+            }
+        }
+        // --- Aveuglement : écran blanc qui se dissipe ---
+        if self.blind_t > 0.0 {
+            draw_rectangle(0.0, 0.0, w, h, Color::new(1.0, 1.0, 1.0, (self.blind_t / 1.3).min(1.0)));
+        }
+
         // --- Dégâts reçus et explosion ---
         if self.hurt_t > 0.0 {
             let a = (self.hurt_t / 0.6).min(1.0) * 0.45;
@@ -132,7 +148,7 @@ impl Game {
         // --- Éliminations ---
         let mut y = 76.0 * k;
         for l in self.killfeed.iter().filter(|l| self.now - l.time < 7.0) {
-            let mid = format!(" [{}{}] ", weapon(l.weapon).name, if l.headshot { " · tête" } else { "" });
+            let mid = format!(" [{}{}] ", item_name(l.weapon), if l.headshot { " · tête" } else { "" });
             let size = 16.0 * k;
             let (wk, wm, wv) = (ui.width_px(&l.killer, size), ui.width_px(&mid, size), ui.width_px(&l.victim, size));
             let x = w - 16.0 * k - (wk + wm + wv);
@@ -202,8 +218,28 @@ impl Game {
             if self.reload_t > 0.0 {
                 ui.shadow_px_r("Rechargement…", right, h - 66.0 * k, 16.0 * k, ACCENT);
             }
+            if self.slot == 3 {
+                ui.shadow_px_r(GRENADES[self.nade].name, right, h - 24.0 * k, 26.0 * k, TEXT);
+            }
             let slots = [(0usize, st.bind(Action::Primary)), (1, st.bind(Action::Secondary)), (2, st.bind(Action::Knife))];
             let mut y = h - 96.0 * k;
+            // Grenades possédées ; le type sélectionné est entre chevrons quand il est en main.
+            let owned: Vec<String> = (0..4)
+                .filter(|i| me.nades[*i] > 0)
+                .map(|i| {
+                    let n = if me.nades[i] > 1 { format!("{} ×{}", GRENADES[i].short, me.nades[i]) } else { GRENADES[i].short.to_string() };
+                    if self.slot == 3 && self.nade == i {
+                        format!("‹{}›", n)
+                    } else {
+                        n
+                    }
+                })
+                .collect();
+            if !owned.is_empty() {
+                let text = format!("{}   [{}]", owned.join(" · "), st.bind(Action::Grenade).label());
+                ui.shadow_px_r(&text, right, y, 16.0 * k, if self.slot == 3 { TEXT } else { DIM });
+                y -= 22.0 * k;
+            }
             for (s, bind) in slots.iter().rev() {
                 let id = if *s < 2 { self.ammo[*s].id } else { KNIFE };
                 if *s < 2 && id == 0 {
@@ -229,6 +265,8 @@ impl Game {
                 hint = Some(format!("Maintenez [{}] pour désamorcer", use_key));
             } else if let (Some(left), true, true) = (self.buy_time_left(), self.in_buy_zone(), self.overlay == Overlay::None) {
                 hint = Some(format!("[{}] Acheter des armes — encore {} s", st.bind(Action::Buy).label(), left.ceil()));
+            } else if self.slot == 3 {
+                hint = Some(format!("[{}] lancer long · [{}] lancer court", st.bind(Action::Fire).label(), st.bind(Action::Aim).label()));
             }
             if let Some(t) = hint {
                 ui.shadow_px_c(&t, w / 2.0, h * 0.66, 18.0 * k, Color::new(1.0, 0.9, 0.5, 1.0));
@@ -298,49 +336,48 @@ impl Game {
     /// Menu d'achat ; les achats sont validés par le serveur.
     pub fn draw_buy(&mut self, ui: &mut Ui, st: &Settings, audio: &Audio) {
         let Some(me) = self.me().cloned() else { return };
+        const W: f32 = 280.0;
+        let green = Color::new(0.55, 0.9, 0.45, 1.0);
         ui.dim(0.35);
-        let panel = Rect::new(130.0, 60.0, 1020.0, 600.0);
-        ui.rect(panel, PANEL);
-        ui.text("ACHATS", 160.0, 108.0, 32.0, TEXT);
-        ui.text_r(&format!("{} $", me.money), 1120.0, 108.0, 30.0, Color::new(0.55, 0.9, 0.45, 1.0));
-        if let Some(s) = self.snap() {
-            let _ = s;
-            let left = self.buy_time_left().unwrap_or(0.0);
-            ui.text_c(&format!("Fermeture des achats dans {} s — zone d'achat uniquement", left.ceil()), 640.0, 106.0, 16.0, DIM);
-        }
+        ui.rect(Rect::new(30.0, 60.0, 1220.0, 600.0), PANEL);
+        ui.text("ACHATS", 56.0, 108.0, 32.0, TEXT);
+        ui.text_r(&format!("{} $", me.money), 1224.0, 108.0, 30.0, green);
+        let left = self.buy_time_left().unwrap_or(0.0);
+        ui.text_c(&format!("Fermeture des achats dans {} s — zone d'achat uniquement", left.ceil()), 640.0, 106.0, 16.0, DIM);
 
-        let groups: [(Class, f32, f32); 5] = [
-            (Class::Pistol, 160.0, 150.0),
-            (Class::Smg, 490.0, 150.0),
-            (Class::Rifle, 820.0, 150.0),
-            (Class::Lmg, 490.0, 360.0),
-            (Class::Sniper, 820.0, 360.0),
-        ];
+        let cols = [56.0, 352.0, 648.0, 944.0];
         let mut info: Option<String> = None;
         let mut order: Option<BuyItem> = None;
-        let row = |ui: &mut Ui, x: f32, y: f32, name: &str, price: u32, owned: bool| -> (bool, bool) {
-            let r = Rect::new(x, y, 300.0, 38.0);
-            let afford = me.money >= price && !owned;
+        // Ligne d'article : (cliquée, survolée). `state` remplace le prix quand l'article n'est plus achetable.
+        let row = |ui: &mut Ui, x: f32, y: f32, name: &str, price: u32, state: Option<&str>| -> (bool, bool) {
+            let r = Rect::new(x, y, W, 38.0);
+            let afford = me.money >= price && state.is_none();
             let hot = ui.hover(r);
             ui.rect(r, if hot && afford { WIDGET_HOT } else { WIDGET });
             if hot && afford {
                 ui.rect(Rect::new(r.x, r.y, 4.0, r.h), ACCENT);
             }
             ui.text(name, x + 14.0, y + 26.0, 19.0, if afford { TEXT } else { DIM });
-            if owned {
-                ui.text_r("possédé", x + 288.0, y + 26.0, 15.0, DIM);
-            } else {
-                let col = if afford { Color::new(0.55, 0.9, 0.45, 1.0) } else { Color::new(0.8, 0.35, 0.3, 1.0) };
-                ui.text_r(&format!("{} $", price), x + 288.0, y + 26.0, 18.0, col);
+            match state {
+                Some(t) => ui.text_r(t, x + W - 12.0, y + 26.0, 15.0, DIM),
+                None => ui.text_r(&format!("{} $", price), x + W - 12.0, y + 26.0, 18.0, if afford { green } else { Color::new(0.8, 0.35, 0.3, 1.0) }),
             }
             (hot && afford && ui.click, hot)
         };
+
+        let groups = [
+            (Class::Pistol, cols[0], 150.0),
+            (Class::Smg, cols[1], 150.0),
+            (Class::Rifle, cols[2], 150.0),
+            (Class::Lmg, cols[1], 360.0),
+            (Class::Sniper, cols[2], 360.0),
+        ];
         for (class, x, y0) in groups {
             ui.text(class.label(), x, y0 + 16.0, 17.0, ACCENT);
             let mut y = y0 + 28.0;
             for d in WEAPONS.iter().filter(|d| d.class == class) {
                 let owned = me.primary == d.id || me.secondary == d.id;
-                let (click, hot) = row(ui, x, y, d.name, d.price, owned);
+                let (click, hot) = row(ui, x, y, d.name, d.price, owned.then_some("possédé"));
                 if click {
                     order = Some(BuyItem::Weapon(d.id));
                 }
@@ -358,8 +395,9 @@ impl Game {
                 y += 44.0;
             }
         }
+
         // Équipement
-        ui.text("Équipement", 160.0, 376.0, 17.0, ACCENT);
+        ui.text("Équipement", cols[0], 376.0, 17.0, ACCENT);
         let full = me.armor >= 100;
         let gear: [(&str, u32, bool, BuyItem, &str); 3] = [
             ("Gilet pare-balles", PRICE_KEVLAR, full, BuyItem::Kevlar, "Gilet pare-balles — réduit les dégâts au corps"),
@@ -374,7 +412,7 @@ impl Game {
         ];
         let mut y = 388.0;
         for (name, price, owned, item, text) in gear {
-            let (click, hot) = row(ui, 160.0, y, name, price, owned);
+            let (click, hot) = row(ui, cols[0], y, name, price, owned.then_some("possédé"));
             if click {
                 order = Some(item);
             }
@@ -383,10 +421,40 @@ impl Game {
             }
             y += 44.0;
         }
-        if let Some(t) = info {
-            ui.text(&t, 160.0, 590.0, 16.0, TEXT);
+
+        // Grenades : quatre au total, une de chaque type (deux aveuglantes).
+        let total: u8 = me.nades.iter().sum();
+        ui.text(&format!("Grenades ({}/{})", total, MAX_GRENADES), cols[3], 166.0, 17.0, ACCENT);
+        let labels = ["Fragmentation", "Fumigène", "Aveuglante", "Incendiaire"];
+        let mut y = 178.0;
+        for (k, g) in GRENADES.iter().enumerate() {
+            let have = me.nades[k];
+            let name = if g.max > 1 { format!("{} ({}/{})", labels[k], have, g.max) } else { labels[k].to_string() };
+            let state = if have >= g.max {
+                Some("possédée")
+            } else if total >= MAX_GRENADES {
+                Some("maximum")
+            } else {
+                None
+            };
+            let (click, hot) = row(ui, cols[3], y, &name, g.price, state);
+            if click {
+                order = Some(BuyItem::Grenade(k as u8));
+            }
+            if hot {
+                info = Some(g.info.to_string());
+            }
+            y += 44.0;
         }
-        ui.text(&format!("[{}] ou [Échap] pour fermer", st.bind(Action::Buy).label()), 160.0, 636.0, 15.0, DIM);
+        ui.text(&format!("[{}] pour prendre une grenade en main,", st.bind(Action::Grenade).label()), cols[3], 384.0, 14.0, DIM);
+        ui.text("encore pour changer de type.", cols[3], 402.0, 14.0, DIM);
+        ui.text("Clic gauche : lancer long", cols[3], 430.0, 14.0, DIM);
+        ui.text("Clic droit : lancer court", cols[3], 448.0, 14.0, DIM);
+
+        if let Some(t) = info {
+            ui.text(&t, 56.0, 590.0, 16.0, TEXT);
+        }
+        ui.text(&format!("[{}] ou [Échap] pour fermer", st.bind(Action::Buy).label()), 56.0, 636.0, 15.0, DIM);
         if let Some(item) = order {
             self.buy(item, audio);
         }

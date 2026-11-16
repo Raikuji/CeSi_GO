@@ -6,6 +6,7 @@
 
 use crate::game::Game;
 use crate::render::{self, grip, limb, reload_pose, ss, Batch, WeaponPose};
+use cesi_common::grenades::{is_grenade, GRENADE_BASE, THROW_WINDUP};
 use cesi_common::physics::{Body, BASE_SPEED};
 use cesi_common::protocol::Team;
 use cesi_common::weapons::{weapon, Class};
@@ -120,6 +121,28 @@ pub fn draw(g: &Game, b: &mut Batch, eye: Vec3, yaw: f32, pitch: f32) {
     let mut rx = va.sway.y * 0.9 + 1.0 * draw;
     let mut ry = -va.sway.x * 0.9;
     let mut rz = -va.tilt + 0.05 * crouch + va.phase.cos() * 0.02 * va.amp - 0.45 * draw;
+
+    if is_grenade(id) {
+        // Grenade en main : le bras part en arrière à l'armement, puis fouette vers l'avant.
+        let mut pos = vec3(0.21, -0.2, 0.5) + off;
+        let released = g.throw_t <= 0.0 && g.throw_anim < 0.45;
+        if g.throw_t > 0.0 {
+            let w = ss(0.0, 1.0, 1.0 - g.throw_t / THROW_WINDUP);
+            pos += vec3(0.07, 0.11, -0.24) * w;
+            rx -= 0.7 * w;
+        } else if released {
+            let a = (g.throw_anim / 0.3).min(1.0);
+            pos += vec3(-0.12, 0.08, 0.32) * (a * PI).sin() + vec3(0.0, -0.3, 0.0) * a;
+            rx += 1.0 * a;
+        }
+        let hm = view * Mat4::from_translation(pos) * Mat4::from_rotation_y(ry - 0.2) * Mat4::from_rotation_x(rx) * Mat4::from_rotation_z(rz);
+        if !released {
+            render::grenade_model(b, &(hm * Mat4::from_translation(vec3(0.0, 0.06, 0.0))), id - GRENADE_BASE);
+        }
+        b.cube(&hm, vec3(-0.036, -0.04, -0.04), vec3(0.036, 0.045, 0.04), SKIN);
+        limb(b, hm.transform_point3(vec3(0.0, -0.04, -0.02)), view.transform_point3(vec3(0.36, -0.55, 0.16)), side, 0.042 * SCALE, sleeve);
+        return;
+    }
 
     if def.class == Class::Knife {
         // Karambit : lame dressée, griffe vers l'avant, flanc tourné vers le joueur.

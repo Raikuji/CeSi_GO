@@ -3,6 +3,7 @@
 
 mod bot;
 mod game;
+mod nades;
 mod nav;
 
 pub use game::{Server, ServerConfig};

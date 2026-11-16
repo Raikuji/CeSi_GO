@@ -7,6 +7,7 @@ use crate::render::{self, Batch, PlayerView, Puppet, WorldRender};
 use crate::viewmodel::{self, ViewAnim};
 use crate::settings::{Action, Settings};
 use crate::ui;
+use cesi_common::grenades::*;
 use cesi_common::map::MapInfo;
 use cesi_common::physics::{self, eye_height, Body, MoveInput, BASE_SPEED};
 use cesi_common::protocol::*;
@@ -147,6 +148,19 @@ pub struct Game {
     pub hit_kill: bool,
     pub hurt_t: f32,
     pub flash_t: f32,
+    /// Grenade sélectionnée, armement en cours, temps écoulé depuis le lancer.
+    pub nade: usize,
+    pub throw_t: f32,
+    pub throw_strong: bool,
+    pub throw_anim: f32,
+    pub throw_cd: f32,
+    pub switch_back: f32,
+    /// Temps d'aveuglement restant.
+    pub blind_t: f32,
+    pub nade_views: Vec<NadeSnap>,
+    pub fire_snd: f64,
+    pub debug_nade: Option<u8>,
+    pub debug_bought: bool,
     pub rng: Rng,
 }
 
@@ -222,6 +236,17 @@ impl Game {
             hit_kill: false,
             hurt_t: 0.0,
             flash_t: 0.0,
+            nade: 0,
+            throw_t: 0.0,
+            throw_strong: true,
+            throw_anim: 9.0,
+            throw_cd: 0.0,
+            switch_back: 0.0,
+            blind_t: 0.0,
+            nade_views: Vec::new(),
+            fire_snd: 0.0,
+            debug_nade: None,
+            debug_bought: false,
             rng: Rng::from_time(),
         })
     }
@@ -240,10 +265,10 @@ impl Game {
     }
 
     pub fn weapon_id(&self) -> u8 {
-        if self.slot < 2 {
-            self.ammo[self.slot].id
-        } else {
-            KNIFE
+        match self.slot {
+            0 | 1 => self.ammo[self.slot].id,
+            3 => GRENADE_BASE + self.nade as u8,
+            _ => KNIFE,
         }
     }
 
@@ -315,6 +340,7 @@ impl Game {
             self.reload_t = 0.0;
             self.zoom = 0;
             self.rescope = (0.0, 0);
+            self.throw_t = 0.0;
         }
     }
 
@@ -340,6 +366,16 @@ impl Game {
         }
         if self.slot < 2 && self.ammo[self.slot].id == 0 {
             self.slot = if self.ammo[1].id != 0 { 1 } else { 2 };
+        }
+        // Plus de grenade de ce type : passer à un autre type, sinon reprendre une arme.
+        if self.slot == 3 && self.throw_t <= 0.0 && self.switch_back <= 0.0 && me.nades[self.nade] == 0 {
+            match (0..4).find(|k| me.nades[*k] > 0) {
+                Some(k) => self.nade = k,
+                None => {
+                    let s = if ids[0] != 0 { 0 } else { 1 };
+                    self.switch_to(s);
+                }
+            }
         }
     }
 
@@ -390,6 +426,9 @@ impl Game {
                 self.reload_t = 0.0;
                 self.zoom = 0;
                 self.step_smooth = 0.0;
+                self.throw_t = 0.0;
+                self.switch_back = 0.0;
+                self.blind_t = 0.0;
                 self.refill = true;
                 self.spectate = None;
             }
@@ -465,6 +504,33 @@ impl Game {
                 self.flash_t = (1.2 - self.cam_pos.distance(pos) / 40.0).clamp(0.15, 1.0);
                 self.burst(pos + Vec3::Y * 0.5, Vec3::Y, 90, 9.0, 0.28, Color::new(1.0, 0.6, 0.15, 1.0));
                 self.burst(pos + Vec3::Y * 0.5, Vec3::Y, 60, 5.0, 0.35, Color::new(0.25, 0.24, 0.23, 1.0));
+            }
+            ServerMsg::Detonate { kind, pos } => {
+                let up = pos + Vec3::Y * 0.3;
+                match kind {
+                    FRAG => {
+                        audio.play_at("boom", self.cam_pos, pos, 80.0, 1.0);
+                        self.flash_t = self.flash_t.max(0.55 - self.cam_pos.distance(pos) / 18.0);
+                        self.burst(up, Vec3::Y, 55, 8.0, 0.16, Color::new(1.0, 0.62, 0.18, 1.0));
+                        self.burst(up, Vec3::Y, 40, 5.0, 0.22, Color::new(0.25, 0.24, 0.23, 1.0));
+                    }
+                    SMOKE => {
+                        audio.play_at("smoke", self.cam_pos, pos, 45.0, 0.8);
+                        self.burst(up, Vec3::Y, 20, 2.5, 0.2, Color::new(0.7, 0.7, 0.72, 1.0));
+                    }
+                    FLASH => {
+                        audio.play_at("bang", self.cam_pos, pos, 70.0, 1.0);
+                        self.burst(up, Vec3::Y, 18, 6.0, 0.08, Color::new(1.0, 1.0, 0.95, 1.0));
+                    }
+                    _ => {
+                        audio.play_at("ignite", self.cam_pos, pos, 50.0, 0.9);
+                        self.burst(up, Vec3::Y, 30, 4.0, 0.12, Color::new(1.0, 0.5, 0.1, 1.0));
+                    }
+                }
+            }
+            ServerMsg::Flashed { duration } => {
+                self.blind_t = self.blind_t.max(duration);
+                audio.play("ring", 0.5);
             }
             ServerMsg::MatchEnd { winner } => {
                 let (text, color) = match winner {
@@ -549,6 +615,11 @@ impl Game {
                 air: p.air,
                 action: p.action,
             });
+        }
+        self.nade_views.clear();
+        for n in &b.nades {
+            let pos = a.nades.iter().find(|m| m.id == n.id).map_or(n.pos, |m| m.pos.lerp(n.pos, k));
+            self.nade_views.push(NadeSnap { pos, ..*n });
         }
         for v in &self.views {
             self.puppets.entry(v.id).or_default().update(v, dt);
@@ -645,6 +716,9 @@ impl Game {
 
         // Effets
         self.fire_cd -= dt;
+        self.throw_cd -= dt;
+        self.throw_anim += dt;
+        self.blind_t -= dt;
         self.draw_t -= dt;
         self.muzzle_t -= dt;
         self.knife_t += dt;
@@ -670,6 +744,16 @@ impl Game {
         };
         let (phase, bomb, time_left) = self.snap().map_or((Phase::Warmup, BombState::None, 0.0), |s| (s.phase, s.bomb, s.time_left));
         self.sync_inventory(&me);
+        // Diagnostic : achète, sélectionne et lance une grenade tout seul.
+        if let Some(k) = self.debug_nade {
+            if me.nades[k as usize] == 0 && !self.debug_bought && self.can_buy() {
+                self.debug_bought = true;
+                self.net.reliable(ClientMsg::Buy(BuyItem::Grenade(k)));
+            } else if me.nades[k as usize] > 0 && self.slot != 3 && self.switch_back <= 0.0 {
+                self.nade = k as usize;
+                self.switch_to(3);
+            }
+        }
         if self.debug & 4 != 0 && self.slot != 2 {
             self.switch_to(2);
         }
@@ -739,9 +823,29 @@ impl Game {
                 if st.pressed(Action::Knife) {
                     self.switch_to(2);
                 }
+                // Grenades : la touche sélectionne la grenade, puis passe au type suivant.
+                let owned: Vec<usize> = (0..4).filter(|k| me.nades[*k] > 0).collect();
+                if st.pressed(Action::Grenade) && !owned.is_empty() && self.throw_t <= 0.0 {
+                    if self.slot == 3 {
+                        let i = owned.iter().position(|k| *k == self.nade).map_or(0, |i| (i + 1) % owned.len());
+                        if owned[i] != self.nade {
+                            self.nade = owned[i];
+                            self.draw_t = 0.25;
+                        }
+                    } else {
+                        if me.nades[self.nade] == 0 {
+                            self.nade = owned[0];
+                        }
+                        self.switch_to(3);
+                    }
+                }
                 let wheel = mouse_wheel().1;
                 if wheel != 0.0 {
-                    let avail: Vec<usize> = (0..3).filter(|s| *s == 2 || self.ammo[*s].id != 0).collect();
+                    let avail: Vec<usize> = (0..4).filter(|s| match *s {
+                        2 => true,
+                        3 => !owned.is_empty(),
+                        s => self.ammo[s].id != 0,
+                    }).collect();
                     let i = avail.iter().position(|s| *s == self.slot).unwrap_or(0) as i32;
                     let n = avail.len() as i32;
                     self.switch_to(avail[((i + if wheel < 0.0 { 1 } else { -1 }) + n) as usize % n as usize]);
@@ -788,6 +892,13 @@ impl Game {
                 let live = matches!(phase, Phase::Live | Phase::RoundEnd);
                 if st.pressed(Action::Reload) && can_reload {
                     self.start_reload(def, audio);
+                } else if self.slot == 3 {
+                    // Clic gauche : lancer long ; clic droit : lancer court.
+                    let go = st.pressed(Action::Fire) || st.pressed(Action::Aim) || (self.debug_nade.is_some() && self.debug & 128 == 0);
+                    if go && live && !acting && self.throw_t <= 0.0 && self.throw_cd <= 0.0 && self.draw_t <= 0.0 && me.nades[self.nade] > 0 {
+                        self.throw_strong = st.pressed(Action::Fire);
+                        self.throw_t = THROW_WINDUP;
+                    }
                 } else if trigger && live && !acting && self.fire_cd <= 0.0 && self.draw_t <= 0.0 && self.reload_t <= 0.0 {
                     if self.slot == 2 || a.mag > 0 {
                         self.fire(def, audio, heavy);
@@ -814,6 +925,32 @@ impl Game {
                 if st.pressed(Action::Chat) {
                     self.overlay = Overlay::Chat;
                     self.chat_input.clear();
+                }
+            }
+            // Grenade : elle part à la fin de l'armement, puis on reprend son arme.
+            if self.throw_t > 0.0 {
+                self.throw_t -= dt;
+                if self.throw_t <= 0.0 && self.slot == 3 {
+                    let (yaw, pitch) = self.view_angles();
+                    let dir = dir_from_angles(yaw, (pitch + 0.1).min(1.5));
+                    self.net.reliable(ClientMsg::Throw { kind: self.nade as u8, origin: self.body.eye(), dir, strong: self.throw_strong });
+                    self.throw_anim = 0.0;
+                    self.throw_cd = 0.7;
+                    self.switch_back = 0.4;
+                    audio.play("throw", 0.5);
+                }
+            }
+            if self.switch_back > 0.0 {
+                self.switch_back -= dt;
+                if self.switch_back <= 0.0 && self.slot == 3 {
+                    let s = if self.ammo[0].id != 0 {
+                        0
+                    } else if self.ammo[1].id != 0 {
+                        1
+                    } else {
+                        2
+                    };
+                    self.switch_to(s);
                 }
             }
             // Retour du recul une fois la rafale terminée.
@@ -872,6 +1009,15 @@ impl Game {
         }
         if self.overlay == Overlay::Buy && !self.can_buy() {
             self.overlay = Overlay::None;
+        }
+
+        // Crépitement des flammes.
+        if self.now - self.fire_snd > 0.45 {
+            let fire = self.snaps.back().and_then(|s| s.areas.iter().filter(|a| a.kind == FIRE).map(|a| a.pos).min_by(|a, b| a.distance(self.cam_pos).total_cmp(&b.distance(self.cam_pos))));
+            if let Some(pos) = fire {
+                self.fire_snd = self.now;
+                audio.play_at("fire", self.cam_pos, pos, 28.0, 0.7);
+            }
         }
 
         // Bip de la bombe, de plus en plus rapide.
@@ -951,6 +1097,21 @@ impl Game {
                 render::bomb_model(batch, &Mat4::from_translation(pos), blink);
             }
             _ => {}
+        }
+        // Grenades en vol, fumées et flammes.
+        let t = self.now as f32;
+        for n in &self.nade_views {
+            let m = Mat4::from_translation(n.pos) * Mat4::from_rotation_y(t * 9.0 + n.id as f32) * Mat4::from_rotation_x(t * 13.0) * Mat4::from_scale(Vec3::splat(1.5));
+            render::grenade_model(batch, &m, n.kind);
+        }
+        if let Some(s) = self.snaps.back() {
+            for a in &s.areas {
+                if a.kind == SMOKE {
+                    render::draw_smoke(batch, a.id, a.pos, a.time_left, t);
+                } else {
+                    render::draw_fire(batch, &self.world, a.id, a.pos, a.time_left, t);
+                }
+            }
         }
         for t in &self.tracers {
             render::beam(batch, t.from, t.to, 0.012, Color::new(1.0, 0.92, 0.6, 1.0));

@@ -218,7 +218,7 @@ fn tab_keys(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) {
             st.rebind_skip = true;
         }
     }
-    ui.text("Molette : changer d'arme · Échap : menu / annuler", 660.0, 570.0, 15.0, DIM);
+    ui.text("Molette : changer d'arme · Échap : menu / annuler", 400.0, 645.0, 15.0, DIM);
     if ui.button(Rect::new(820.0, 616.0, 290.0, 46.0), "TOUCHES PAR DÉFAUT", st.rebinding.is_none()) && st.rebinding.is_none() {
         s.reset_binds();
     }

@@ -136,6 +136,13 @@ impl Audio {
             ("lose", melody(&[(440.0, 0.16), (370.0, 0.16), (294.0, 0.4)])),
             ("buy", clicks(0.2, &[0.0, 0.07], 11)),
             ("explosion", explosion()),
+            ("boom", shot(1.1, 5.0, 0.18, 55.0, 21)),
+            ("bang", shot(0.5, 11.0, 0.75, 320.0, 22)),
+            ("ring", tone(2.6, &[3150.0, 3170.0], 1.5)),
+            ("smoke", thud(1.3, 0.55, 2.6, 0.8, 23)),
+            ("ignite", thud(0.9, 0.16, 4.0, 3.2, 24)),
+            ("fire", thud(0.55, 0.3, 4.5, 1.1, 25)),
+            ("throw", thud(0.2, 0.45, 18.0, 1.0, 26)),
         ];
         let mut sounds = HashMap::new();
         for (name, samples) in defs {

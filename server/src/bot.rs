@@ -3,6 +3,7 @@
 use crate::game::Player;
 use crate::nav::Nav;
 use cesi_common::glam::Vec3;
+use cesi_common::grenades::*;
 use cesi_common::map::{in_aabb, MapInfo};
 use cesi_common::physics::{self, Body, MoveInput, BASE_SPEED};
 use cesi_common::protocol::{BombState, Phase, PlayerId, Team};
@@ -30,6 +31,9 @@ pub struct BotCtx<'a> {
     pub t_site: u8,
     /// Position d'un ennemi actuellement vu par un coéquipier.
     pub alert: Option<Vec3>,
+    /// Centres des nuages de fumée et des zones en flammes.
+    pub smokes: &'a [Vec3],
+    pub fires: &'a [Vec3],
     pub dt: f32,
 }
 
@@ -38,6 +42,8 @@ pub struct BotOut {
     pub shot: Option<(Vec3, Vec3, u8)>,
     pub using: bool,
     pub weapon: u8,
+    /// Lancer de grenade : type, origine, direction.
+    pub throw: Option<(u8, Vec3, Vec3)>,
 }
 
 pub struct Bot {
@@ -79,6 +85,9 @@ pub struct Bot {
     look_t: f32,
     /// Direction d'où l'ennemi devrait arriver, calculée pour la position tenue.
     watch: Option<(Vec3, f32)>,
+    /// Temps d'aveuglement restant.
+    blind_t: f32,
+    nade_cd: f32,
 }
 
 impl Bot {
@@ -120,6 +129,8 @@ impl Bot {
             look_yaw: 0.0,
             look_t: 0.0,
             watch: None,
+            blind_t: 0.0,
+            nade_cd: 3.0,
         }
     }
 
@@ -132,6 +143,11 @@ impl Bot {
         self.look_yaw = yaw;
         self.site = site;
         self.stuck_pos = pos;
+    }
+
+    /// Aveugle le bot (grenade aveuglante).
+    pub fn blind(&mut self, duration: f32) {
+        self.blind_t = self.blind_t.max(duration * 0.8);
     }
 
     pub fn reloading(&self) -> bool {
@@ -157,7 +173,7 @@ impl Bot {
             self.mag = def.mag;
             self.reload_t = 0.0;
         }
-        let mut out = BotOut { shot: None, using: false, weapon: wid };
+        let mut out = BotOut { shot: None, using: false, weapon: wid, throw: None };
         let eye = self.body.eye();
         let pos = self.body.pos;
         let frozen = c.phase == Phase::Freeze;
@@ -175,7 +191,12 @@ impl Bot {
 
         // --- Perception : ennemi visible le plus proche ---
         self.vis_cd -= dt;
-        if self.vis_cd <= 0.0 {
+        self.blind_t -= dt;
+        if self.blind_t > 0.0 {
+            // Aveuglé : ne voit plus personne.
+            self.visible = false;
+            self.vis_cd = 0.1;
+        } else if self.vis_cd <= 0.0 {
             self.vis_cd = 0.08 + rng.f32() * 0.04;
             let fwd = dir_from_angles(self.yaw, self.pitch);
             let mut best: Option<(PlayerId, f32)> = None;
@@ -191,6 +212,10 @@ impl Bot {
                 }
                 let dn = d / dist;
                 if dn.dot(fwd) < 0.3 && dist > 4.0 {
+                    continue;
+                }
+                // La fumée bloque la vue.
+                if c.smokes.iter().any(|s| segment_hits_sphere(eye, chest, *s + Vec3::Y, SMOKE_RADIUS * 0.9)) {
                     continue;
                 }
                 let mut seen = c.world.raycast(eye, dn, dist).is_none();
@@ -289,6 +314,35 @@ impl Bot {
                 hold = false;
                 if hdist(pos, ls) < 1.0 {
                     self.last_seen = None;
+                }
+            }
+        }
+
+        // Dans les flammes : sortir au plus vite.
+        if let Some(f) = c.fires.iter().find(|f| hdist(pos, **f) < FIRE_RADIUS + 0.7 && (pos.y - f.y).abs() < 2.0) {
+            let mut away = Vec3::new(pos.x - f.x, 0.0, pos.z - f.z);
+            if away.length_squared() < 0.01 {
+                away = dir_from_angles(self.yaw + PI, 0.0);
+            }
+            goal = Some(pos + away.normalize() * 5.0);
+            hold = false;
+            out.using = false;
+        }
+
+        // Grenade vers le dernier endroit où un ennemi a été aperçu.
+        self.nade_cd -= dt;
+        let live = matches!(c.phase, Phase::Live);
+        if live && !self.visible && !out.using && self.blind_t <= 0.0 && self.nade_cd <= 0.0 && (0.7..3.5).contains(&self.lost_t) {
+            if let Some(ls) = self.last_seen {
+                let kind = [FRAG, FIRE, FLASH].into_iter().find(|k| me.nades[*k as usize] > 0);
+                if let (Some(kind), true) = (kind, (7.0..24.0).contains(&hdist(pos, ls))) {
+                    let dir = ballistic(eye, ls + Vec3::Y * 0.3, THROW_SPEED, NADE_GRAVITY);
+                    if c.world.raycast(eye, dir, 3.5).is_none() {
+                        out.throw = Some((kind, eye, dir));
+                        self.nade_cd = rng.range(5.0, 9.0);
+                    } else {
+                        self.nade_cd = 1.0;
+                    }
                 }
             }
         }
