@@ -9,6 +9,7 @@ mod menu;
 mod netclient;
 mod render;
 mod settings;
+mod textedit;
 mod ui;
 mod viewmodel;
 
@@ -99,6 +100,44 @@ fn backdrop(wr: &WorldRender, world: &World, t: f32) {
     view(wr, centre + vec3((t * 0.06).cos() * 40.0, 24.0, (t * 0.06).sin() * 40.0), centre);
 }
 
+/// Diagnostic « --shot champ » : colle, copie et coupe dans le champ d'adresse par le
+/// même chemin que les raccourcis clavier, puis laisse une sélection pour la capture.
+/// Le presse-papiers de l'utilisateur est remis en place à la fin.
+fn field_test(step: &mut u32, saved: &mut Option<String>, ui: &mut Ui, s: &mut Settings, menu: &mut MenuState) {
+    use macroquad::miniquad::window::{clipboard_get, clipboard_set};
+    use textedit::Cmd;
+    menu.screen = Screen::Play;
+    *step += 1;
+    match *step {
+        1 => {
+            *saved = clipboard_get();
+            s.last_server.clear();
+            clipboard_set("  192.168.1.42:27500\r\n");
+            ui.inject(4, (0, 0), Some(Cmd::Paste));
+        }
+        2 => {
+            println!("collé : {:?}", s.last_server);
+            ui.inject(4, (0, 12), Some(Cmd::Copy));
+        }
+        3 => {
+            println!("copié : {:?}", clipboard_get());
+            ui.inject(4, (13, 18), Some(Cmd::Cut));
+        }
+        4 => {
+            println!("coupé : {:?}, reste {:?}", clipboard_get(), s.last_server);
+            ui.inject(4, (13, 13), Some(Cmd::Paste));
+        }
+        5 => {
+            println!("recollé : {:?}", s.last_server);
+            if let Some(c) = saved.take() {
+                clipboard_set(&c);
+            }
+            ui.inject(4, (4, 12), None);
+        }
+        _ => ui.inject(4, (4, 12), None),
+    }
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     // Option de diagnostic : --shot <écran> <fichier.png> capture un écran puis quitte.
@@ -144,11 +183,15 @@ async fn main() {
     let mut shot_at: Option<f64> = shot.as_ref().map(|_| get_time() + 1.0);
     // --connect <adresse> : rejoint directement un serveur au lancement.
     let mut autojoin = args.iter().position(|a| a == "--connect").and_then(|i| args.get(i + 1).cloned());
+    let (mut field_step, mut field_clip) = (0u32, None);
 
     loop {
         let dt = get_frame_time().min(0.1);
         audio.volume = settings.volume;
         ui.begin();
+        if matches!(&shot, Some((m, _)) if m == "champ") {
+            field_test(&mut field_step, &mut field_clip, &mut ui, &mut settings, &mut menu);
+        }
         let esc = is_key_pressed(KeyCode::Escape);
         let mut start: Option<bool> = None; // Some(true) = partie locale
         let mut leave: Option<Option<String>> = None;

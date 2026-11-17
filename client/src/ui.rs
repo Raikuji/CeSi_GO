@@ -1,6 +1,9 @@
 //! Petite interface en mode immédiat : texte, boutons, curseurs, cases, champs.
 //! Les menus sont dessinés dans un espace virtuel de 1280x720 mis à l'échelle.
 
+use crate::textedit::{Cmd, Edit};
+use macroquad::miniquad::window::{clipboard_get, clipboard_set, set_mouse_cursor};
+use macroquad::miniquad::CursorIcon;
 use macroquad::prelude::*;
 use std::borrow::Cow;
 
@@ -13,6 +16,11 @@ pub const WIDGET_HOT: Color = Color::new(0.26, 0.29, 0.36, 1.0);
 pub const T_COLOR: Color = Color::new(0.93, 0.68, 0.26, 1.0);
 pub const CT_COLOR: Color = Color::new(0.42, 0.66, 0.96, 1.0);
 
+/// Taille du texte des champs de saisie.
+const FIELD_TEXT: f32 = 20.0;
+/// Touches d'édition répétées tant qu'elles sont maintenues.
+const EDIT_KEYS: [KeyCode; 6] = [KeyCode::Backspace, KeyCode::Delete, KeyCode::Left, KeyCode::Right, KeyCode::Home, KeyCode::End];
+
 pub struct Ui {
     pub font: Option<Font>,
     /// Échelle et décalage de l'espace virtuel.
@@ -23,9 +31,27 @@ pub struct Ui {
     pub click: bool,
     pub down: bool,
     pub chars: Vec<char>,
-    pub backspace: bool,
+    /// Touches d'édition déclenchées cette image, répétitions comprises.
+    keys: Vec<KeyCode>,
+    /// Touche d'édition maintenue et heure de sa prochaine répétition.
+    held: Option<(KeyCode, f64)>,
+    /// Raccourci d'édition reçu cette image.
+    cmd: Option<Cmd>,
     active: Option<u32>,
     pub focus: Option<u32>,
+    /// Curseur et sélection du champ qui a la saisie (`edit_id`).
+    edit: Edit,
+    edit_id: Option<u32>,
+    /// Premier caractère affiché quand le texte dépasse du champ.
+    first: usize,
+    /// Sélection à la souris en cours.
+    drag: bool,
+    last_click: f64,
+    /// Heure de la dernière action, pour le clignotement du curseur.
+    blink: f64,
+    /// La souris survole un champ de texte : curseur en forme de barre.
+    ibeam: bool,
+    ibeam_on: bool,
 }
 
 fn strip_accents(t: &str) -> String {
@@ -69,9 +95,19 @@ impl Ui {
             click: false,
             down: false,
             chars: Vec::new(),
-            backspace: false,
+            keys: Vec::new(),
+            held: None,
+            cmd: None,
             active: None,
             focus: None,
+            edit: Edit::default(),
+            edit_id: None,
+            first: 0,
+            drag: false,
+            last_click: 0.0,
+            blink: 0.0,
+            ibeam: false,
+            ibeam_on: false,
         }
     }
 
@@ -84,14 +120,62 @@ impl Ui {
         self.down = is_mouse_button_down(MouseButton::Left);
         if !self.down {
             self.active = None;
+            self.drag = false;
         }
+        if self.ibeam != self.ibeam_on {
+            set_mouse_cursor(if self.ibeam { CursorIcon::Text } else { CursorIcon::Default });
+            self.ibeam_on = self.ibeam;
+        }
+        self.ibeam = false;
+
         self.chars.clear();
+        self.cmd = None;
         while let Some(c) = get_char_pressed() {
-            if !c.is_control() {
-                self.chars.push(c);
+            match c {
+                // Sous Windows, Ctrl+lettre arrive comme caractère de contrôle : la lettre
+                // est celle de la disposition du clavier (AZERTY compris), pas une position.
+                '\x01' => self.cmd = Some(Cmd::SelectAll),
+                '\x03' => self.cmd = Some(Cmd::Copy),
+                '\x16' => self.cmd = Some(Cmd::Paste),
+                '\x18' => self.cmd = Some(Cmd::Cut),
+                c if !c.is_control() => self.chars.push(c),
+                _ => {}
             }
         }
-        self.backspace = is_key_pressed(KeyCode::Backspace);
+        let ctrl = is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl);
+        let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+        if cfg!(not(windows)) && (ctrl || is_key_down(KeyCode::LeftSuper)) {
+            for (k, c) in [(KeyCode::A, Cmd::SelectAll), (KeyCode::C, Cmd::Copy), (KeyCode::V, Cmd::Paste), (KeyCode::X, Cmd::Cut)] {
+                if is_key_pressed(k) {
+                    self.cmd = Some(c);
+                }
+            }
+        }
+        // Anciens raccourcis : Ctrl+Inser, Maj+Inser, Maj+Suppr.
+        if is_key_pressed(KeyCode::Insert) && (ctrl || shift) {
+            self.cmd = Some(if ctrl { Cmd::Copy } else { Cmd::Paste });
+        }
+        if is_key_pressed(KeyCode::Delete) && shift {
+            self.cmd = Some(Cmd::Cut);
+        }
+
+        // macroquad ne signale pas la répétition des touches maintenues : on la refait ici.
+        self.keys.clear();
+        let now = get_time();
+        for k in EDIT_KEYS {
+            if is_key_pressed(k) {
+                self.keys.push(k);
+                self.held = Some((k, now + 0.4));
+            }
+        }
+        match self.held {
+            Some((k, _)) if !is_key_down(k) => self.held = None,
+            Some((k, t)) if now >= t => {
+                self.keys.push(k);
+                self.held = Some((k, now + 0.035));
+            }
+            _ => {}
+        }
     }
 
     fn fix<'a>(&self, t: &'a str) -> Cow<'a, str> {
@@ -224,33 +308,169 @@ impl Ui {
         false
     }
 
+    /// Largeur des caractères `a..b` d'un champ de texte.
+    fn span(&self, chars: &[char], a: usize, b: usize) -> f32 {
+        if a >= b {
+            return 0.0;
+        }
+        self.width(&chars[a..b].iter().collect::<String>(), FIELD_TEXT)
+    }
+
+    /// Dernier caractère (exclu) qui tient dans `room` en affichant à partir de `first`.
+    fn fit(&self, chars: &[char], first: usize, room: f32) -> usize {
+        let mut last = first;
+        while last < chars.len() && self.span(chars, first, last + 1) <= room {
+            last += 1;
+        }
+        last
+    }
+
+    /// Position du curseur la plus proche de la souris, parmi les caractères affichés.
+    fn index_at(&self, chars: &[char], x0: f32, room: f32) -> usize {
+        let last = self.fit(chars, self.first, room);
+        let x = self.mouse.x - x0;
+        (self.first..=last)
+            .min_by(|a, b| {
+                let (da, db) = ((self.span(chars, self.first, *a) - x).abs(), (self.span(chars, self.first, *b) - x).abs());
+                da.total_cmp(&db)
+            })
+            .unwrap_or(self.first)
+    }
+
+    /// Diagnostic : impose la sélection du champ `id` et lui applique un raccourci.
+    pub fn inject(&mut self, id: u32, sel: (usize, usize), cmd: Option<Cmd>) {
+        self.focus = Some(id);
+        self.edit_id = Some(id);
+        self.edit = Edit { anchor: sel.0, caret: sel.1 };
+        self.cmd = cmd;
+        self.blink = get_time();
+    }
+
+    /// Champ de saisie d'une ligne : curseur, sélection à la souris ou avec Maj,
+    /// copier / couper / coller. Renvoie vrai si le texte a changé.
     pub fn textfield(&mut self, id: u32, r: Rect, text: &mut String, max: usize) -> bool {
+        let (x0, room) = (r.x + 10.0, r.w - 20.0);
+        let base = r.y + r.h / 2.0 + 7.0;
+        let inside = self.hover(r);
+        if inside {
+            self.ibeam = true;
+        }
         if self.click {
-            if self.hover(r) {
+            if inside {
                 self.focus = Some(id);
             } else if self.focus == Some(id) {
                 self.focus = None;
             }
         }
-        let focused = self.focus == Some(id);
+        if self.focus != Some(id) {
+            if self.edit_id == Some(id) {
+                self.edit_id = None;
+            }
+            let chars: Vec<char> = text.chars().collect();
+            let shown: String = chars[..self.fit(&chars, 0, room)].iter().collect();
+            self.rect(r, WIDGET);
+            self.text(&shown, x0, base, FIELD_TEXT, TEXT);
+            return false;
+        }
+
+        let now = get_time();
+        if self.edit_id != Some(id) {
+            // Le champ vient de recevoir la saisie : curseur à la fin.
+            self.edit_id = Some(id);
+            self.edit = Edit::at_end(text);
+            self.first = 0;
+            self.last_click = 0.0;
+            self.blink = now;
+        }
+        self.edit.clamp(text);
+        let before = self.edit;
+        let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+
+        // Souris : clic pour placer le curseur, glisser pour sélectionner, double clic pour tout prendre.
+        let chars: Vec<char> = text.chars().collect();
+        self.first = self.first.min(chars.len());
+        if self.click && inside {
+            if now - self.last_click < 0.35 && !shift {
+                self.edit.select_all(text);
+                self.drag = false;
+                self.last_click = 0.0;
+            } else {
+                self.edit.move_to(self.index_at(&chars, x0, room), shift);
+                self.drag = true;
+                self.last_click = now;
+            }
+        } else if self.drag && self.down {
+            // Au-delà des bords, la sélection fait défiler le texte.
+            let i = if self.mouse.x < x0 {
+                self.first.saturating_sub(1)
+            } else if self.mouse.x > x0 + room {
+                (self.fit(&chars, self.first, room) + 1).min(chars.len())
+            } else {
+                self.index_at(&chars, x0, room)
+            };
+            self.edit.move_to(i, true);
+        }
+
+        // Clavier.
         let mut changed = false;
-        if focused {
-            for c in &self.chars {
-                if text.chars().count() < max {
-                    text.push(*c);
-                    changed = true;
+        if !self.chars.is_empty() {
+            let typed: String = self.chars.iter().collect();
+            changed |= self.edit.insert(text, &typed, max);
+        }
+        for k in 0..self.keys.len() {
+            match self.keys[k] {
+                KeyCode::Backspace => changed |= self.edit.erase(text, false),
+                KeyCode::Delete if !shift => changed |= self.edit.erase(text, true),
+                KeyCode::Left => self.edit.step(text, -1, shift),
+                KeyCode::Right => self.edit.step(text, 1, shift),
+                KeyCode::Home => self.edit.move_to(0, shift),
+                KeyCode::End => self.edit.move_to(text.chars().count(), shift),
+                _ => {}
+            }
+        }
+        match self.cmd.take() {
+            Some(Cmd::SelectAll) => self.edit.select_all(text),
+            Some(Cmd::Copy) if self.edit.has_selection() => clipboard_set(self.edit.selected(text)),
+            Some(Cmd::Cut) if self.edit.has_selection() => {
+                clipboard_set(self.edit.selected(text));
+                changed |= self.edit.delete_selection(text);
+            }
+            Some(Cmd::Paste) => {
+                if let Some(clip) = clipboard_get() {
+                    changed |= self.edit.insert(text, clip.trim(), max);
                 }
             }
-            if self.backspace && text.pop().is_some() {
-                changed = true;
-            }
+            _ => {}
         }
+        if changed || self.edit != before {
+            self.blink = now;
+        }
+
+        // Le texte défile pour garder le curseur visible.
+        let chars: Vec<char> = text.chars().collect();
+        let caret = self.edit.caret;
+        self.first = self.first.min(caret);
+        while self.span(&chars, self.first, caret) > room {
+            self.first += 1;
+        }
+        while self.first > 0 && self.span(&chars, self.first - 1, chars.len()) <= room {
+            self.first -= 1;
+        }
+        let (first, last) = (self.first, self.fit(&chars, self.first, room));
+
         self.rect(r, WIDGET);
-        if focused {
-            self.frame(r, ACCENT);
+        self.frame(r, ACCENT);
+        let (a, b) = self.edit.range();
+        let (a, b) = (a.clamp(first, last), b.clamp(first, last));
+        if a < b {
+            let sel = Rect::new(x0 + self.span(&chars, first, a), r.y + 6.0, self.span(&chars, a, b), r.h - 12.0);
+            self.rect(sel, Color::new(ACCENT.r, ACCENT.g, ACCENT.b, 0.5));
         }
-        let caret = if focused && (get_time() * 2.0) as i64 % 2 == 0 { "|" } else { "" };
-        self.text(&format!("{}{}", text, caret), r.x + 10.0, r.y + r.h / 2.0 + 7.0, 20.0, TEXT);
+        let shown: String = chars[first..last].iter().collect();
+        self.text(&shown, x0, base, FIELD_TEXT, TEXT);
+        if ((now - self.blink) * 2.0) as i64 % 2 == 0 {
+            self.rect(Rect::new(x0 + self.span(&chars, first, caret) - 1.0, r.y + 7.0, 2.0, r.h - 14.0), TEXT);
+        }
         changed
     }
 }

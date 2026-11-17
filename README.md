@@ -22,7 +22,8 @@ Deux exécutables sont produits dans `target/release/` :
 - **En réseau** : lancer `cesi_go_server.exe` sur une machine (port UDP 27500
   à autoriser dans le pare-feu), puis dans le jeu : Jouer → saisir l'adresse
   affichée par le serveur → Connexion. On peut aussi lancer
-  `cesi_go.exe --connect ip:port`.
+  `cesi_go.exe --connect ip:port`. L'adresse peut être collée avec `Ctrl+V` ;
+  les champs de texte acceptent la sélection à la souris et `Ctrl+A/C/X/V`.
 
 Les réglages (touches, sensibilité, viseur) se trouvent dans **Options** et
 sont enregistrés dans `%APPDATA%\CeSi_GO\settings.json`.
