@@ -75,6 +75,14 @@ pub struct KillLine {
     pub mine: bool,
 }
 
+/// Dégâts infligés à un joueur pendant le round.
+pub struct DmgLine {
+    pub victim: PlayerId,
+    pub damage: u32,
+    pub hits: u32,
+    pub killed: bool,
+}
+
 pub struct Game {
     pub net: NetClient,
     pub world: Rc<World>,
@@ -141,6 +149,10 @@ pub struct Game {
     pub reload_stage: u8,
     pub chat_input: String,
     pub killfeed: Vec<KillLine>,
+    /// Dégâts infligés depuis le début du round, affichés à la mort.
+    pub round_dmg: Vec<DmgLine>,
+    /// Diagnostic : affiche le bilan des dégâts même en vie, avec des valeurs d'exemple.
+    pub debug_dmg: bool,
     pub chat: Vec<(String, Option<Team>, String, f64)>,
     pub center: Option<(String, f64, Color)>,
     pub hitmarker_t: f32,
@@ -275,6 +287,8 @@ impl Game {
             reload_stage: 0,
             chat_input: String::new(),
             killfeed: Vec::new(),
+            round_dmg: Vec::new(),
+            debug_dmg: false,
             chat: Vec::new(),
             center: None,
             hitmarker_t: 0.0,
@@ -513,7 +527,17 @@ impl Game {
                     }
                 }
             }
-            ServerMsg::Hit { headshot, killed, pos, .. } => {
+            ServerMsg::Hit { victim, damage, headshot, killed, pos } => {
+                if Some(victim) != self.my_id {
+                    match self.round_dmg.iter_mut().find(|l| l.victim == victim) {
+                        Some(l) => {
+                            l.damage += damage as u32;
+                            l.hits += 1;
+                            l.killed |= killed;
+                        }
+                        None => self.round_dmg.push(DmgLine { victim, damage: damage as u32, hits: 1, killed }),
+                    }
+                }
                 self.hitmarker_t = 0.25;
                 self.hit_kill = killed;
                 audio.play(if headshot { "headshot" } else { "hit" }, 0.6);
@@ -541,6 +565,7 @@ impl Game {
                 }
             }
             ServerMsg::RoundStart { round } => {
+                self.round_dmg.clear();
                 self.corpses.clear();
                 self.particles.clear();
                 self.tracers.clear();

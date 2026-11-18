@@ -1289,6 +1289,7 @@ impl Server {
             v.armor = (v.armor - ((dmg - hp) * 0.5).ceil() as i32).max(0);
         }
         let d = hp.round().max(1.0) as i32;
+        let dealt = d.min(v.health.max(0));
         v.health -= d;
         let killed = v.health <= 0;
         let (vid, vbot) = (v.id, v.is_bot);
@@ -1298,7 +1299,7 @@ impl Server {
         if let Some(a) = attacker {
             let (aid, abot) = (self.players[a].id, self.players[a].is_bot);
             if !abot {
-                self.send_to(aid, ServerMsg::Hit { victim: vid, damage: d.min(999) as u16, headshot: head, killed, pos: hit_pos });
+                self.send_to(aid, ServerMsg::Hit { victim: vid, damage: dealt.min(999) as u16, headshot: head, killed, pos: hit_pos });
             }
         }
         if killed {

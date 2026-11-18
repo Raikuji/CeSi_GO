@@ -129,7 +129,7 @@ pub enum ServerMsg {
     Spawn { pos: Vec3, yaw: f32 },
     /// Tir d'un autre joueur (traçante et son).
     Shot { shooter: PlayerId, weapon: u8, origin: Vec3, end: Vec3, hit_player: bool },
-    /// Confirmation de touche pour le tireur.
+    /// Confirmation de touche pour le tireur ; `damage` : vie réellement retirée.
     Hit { victim: PlayerId, damage: u16, headshot: bool, killed: bool, pos: Vec3 },
     /// Dégâts reçus.
     Hurt { from: Vec3, damage: u16 },

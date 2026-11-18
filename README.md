@@ -50,6 +50,9 @@ voit (pas à travers les murs ni les fumées). On y voit aussi les sites A et B,
 les fumées, les flammes et la bombe (posée pour tous, au sol ou portée pour les
 Attaquants).
 
+Une fois éliminé, le coin haut gauche affiche les dégâts infligés pendant le
+round : joueur touché, nombre de touches, éliminations et total.
+
 ## Grenades
 
 Quatre grenades s'achètent dans le menu d'achat (quatre au maximum, une de

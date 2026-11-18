@@ -304,7 +304,7 @@ async fn main() {
                     menu.screen = Screen::Settings;
                     menu.tab = ["options", "touches", "viseur"].iter().position(|m| m == mode).unwrap_or(0);
                 }
-                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" | "nade" | "main" | "sol" | "echange" | "jeter"
+                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" | "nade" | "main" | "sol" | "echange" | "jeter" | "degats"
                     if game.is_none() && start.is_none() =>
                 {
                     start = Some(true);
@@ -322,6 +322,20 @@ async fn main() {
             // « nade » : --shot nade <fichier> --nade <type> achète et lance la grenade.
             if let Some(i) = args.iter().position(|a| a == "--nade") {
                 g.debug_nade = args.get(i + 1).and_then(|a| a.parse().ok());
+            }
+            // « degats » : bilan des dégâts avec des valeurs d'exemple sur les adversaires.
+            if mode == "degats" && !g.debug_dmg {
+                if let (Some(snap), Some(me)) = (g.snap(), g.me()) {
+                    let foes: Vec<_> = snap.players.iter().filter(|p| p.team != me.team).map(|p| p.id).take(3).collect();
+                    if foes.len() == 3 {
+                        g.round_dmg = vec![
+                            game::DmgLine { victim: foes[0], damage: 100, hits: 3, killed: true },
+                            game::DmgLine { victim: foes[1], damage: 27, hits: 1, killed: false },
+                            game::DmgLine { victim: foes[2], damage: 64, hits: 2, killed: false },
+                        ];
+                        g.debug_dmg = true;
+                    }
+                }
             }
             // « sol » regarde par terre ; « echange » ramasse en plus les armes visées (deux fois).
             // « jeter » jette l'arme en main puis regarde où elle est tombée.

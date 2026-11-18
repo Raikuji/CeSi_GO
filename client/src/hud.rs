@@ -287,8 +287,48 @@ impl Game {
             ui.shadow_px_c(&text, w / 2.0, h * 0.86, 20.0 * k, TEXT);
         }
 
+        // --- Bilan des dégâts infligés, une fois mort ---
+        if (!me.alive && matches!(snap.phase, Phase::Live | Phase::RoundEnd)) || self.debug_dmg {
+            self.draw_damage(ui, snap.round);
+        }
+
         if st.down(Action::Scoreboard) || snap.phase == Phase::MatchEnd || self.debug & 2 != 0 {
             self.draw_scoreboard(ui);
+        }
+    }
+
+    /// Dégâts infligés pendant le round, par joueur touché (coin haut gauche).
+    fn draw_damage(&self, ui: &Ui, round: u16) {
+        let k = screen_height() / 720.0;
+        let (x, y0, wd) = (16.0 * k, 16.0 * k, 360.0 * k);
+        let rows = self.round_dmg.len().max(1) as f32;
+        let hgt = (58.0 + rows * 24.0 + if self.round_dmg.len() > 1 { 28.0 } else { 0.0 }) * k;
+        draw_rectangle(x, y0, wd, hgt, Color::new(0.0, 0.0, 0.0, 0.65));
+        draw_rectangle(x, y0, 4.0 * k, hgt, ACCENT);
+        ui.shadow_px(&format!("DÉGÂTS INFLIGÉS — ROUND {}", round), x + 16.0 * k, y0 + 26.0 * k, 15.0 * k, ACCENT);
+        let right = x + wd - 14.0 * k;
+        let mut y = y0 + 54.0 * k;
+        if self.round_dmg.is_empty() {
+            ui.shadow_px("Aucun joueur touché", x + 16.0 * k, y, 16.0 * k, DIM);
+            return;
+        }
+        let mut total = 0;
+        for l in &self.round_dmg {
+            let (name, team) = self.player(l.victim).map_or(("?".to_string(), Team::T), |p| (p.name.clone(), p.team));
+            ui.shadow_px(&name, x + 16.0 * k, y, 16.0 * k, team_color(team));
+            let touches = if l.hits > 1 { format!("{} touches", l.hits) } else { "1 touche".to_string() };
+            ui.shadow_px_r(&touches, right - 110.0 * k, y, 14.0 * k, DIM);
+            if l.killed {
+                ui.shadow_px_r("tué", right - 56.0 * k, y, 14.0 * k, Color::new(1.0, 0.35, 0.3, 1.0));
+            }
+            ui.shadow_px_r(&l.damage.to_string(), right, y, 18.0 * k, TEXT);
+            total += l.damage;
+            y += 24.0 * k;
+        }
+        if self.round_dmg.len() > 1 {
+            draw_rectangle(x + 16.0 * k, y - 12.0 * k, wd - 30.0 * k, 1.0_f32.max(k), Color::new(1.0, 1.0, 1.0, 0.25));
+            ui.shadow_px("Total", x + 16.0 * k, y + 10.0 * k, 16.0 * k, TEXT);
+            ui.shadow_px_r(&total.to_string(), right, y + 10.0 * k, 18.0 * k, ACCENT);
         }
     }
 
