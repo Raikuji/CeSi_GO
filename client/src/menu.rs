@@ -293,7 +293,7 @@ fn tab_crosshair(ui: &mut Ui, s: &mut Settings) {
     ui.text("Aperçu", p.x, p.y - 10.0, 16.0, DIM);
     for i in 0..3 {
         let cx = (p.x + p.w / 2.0) * ui.s + ui.ox;
-        let cy = (p.y + 50.0 + i as f32 * 100.0) * ui.s;
+        let cy = (p.y + 50.0 + i as f32 * 100.0) * ui.s + ui.oy;
         draw_crosshair(cx, cy, c, 0.0);
     }
 

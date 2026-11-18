@@ -26,6 +26,7 @@ pub struct Ui {
     /// Échelle et décalage de l'espace virtuel.
     pub s: f32,
     pub ox: f32,
+    pub oy: f32,
     /// Souris en coordonnées virtuelles.
     pub mouse: Vec2,
     pub click: bool,
@@ -91,6 +92,7 @@ impl Ui {
             font,
             s: 1.0,
             ox: 0.0,
+            oy: 0.0,
             mouse: Vec2::ZERO,
             click: false,
             down: false,
@@ -112,10 +114,13 @@ impl Ui {
     }
 
     pub fn begin(&mut self) {
-        self.s = screen_height() / 720.0;
+        // L'espace virtuel tient entier à l'écran, centré (bandes en haut et en bas
+        // sur un écran plus haut que 16:9, comme un 16:10).
+        self.s = (screen_height() / 720.0).min(screen_width() / 1280.0);
         self.ox = (screen_width() - 1280.0 * self.s) / 2.0;
+        self.oy = (screen_height() - 720.0 * self.s) / 2.0;
         let (mx, my) = mouse_position();
-        self.mouse = vec2((mx - self.ox) / self.s, my / self.s);
+        self.mouse = vec2((mx - self.ox) / self.s, (my - self.oy) / self.s);
         self.click = is_mouse_button_pressed(MouseButton::Left);
         self.down = is_mouse_button_down(MouseButton::Left);
         if !self.down {
@@ -219,7 +224,7 @@ impl Ui {
     // ---- Coordonnées virtuelles (menus) ----
 
     pub fn text(&self, t: &str, x: f32, y: f32, size: f32, color: Color) {
-        self.text_px(t, x * self.s + self.ox, y * self.s, size * self.s, color);
+        self.text_px(t, x * self.s + self.ox, y * self.s + self.oy, size * self.s, color);
     }
 
     pub fn width(&self, t: &str, size: f32) -> f32 {
@@ -235,11 +240,11 @@ impl Ui {
     }
 
     pub fn rect(&self, r: Rect, color: Color) {
-        draw_rectangle(r.x * self.s + self.ox, r.y * self.s, r.w * self.s, r.h * self.s, color);
+        draw_rectangle(r.x * self.s + self.ox, r.y * self.s + self.oy, r.w * self.s, r.h * self.s, color);
     }
 
     pub fn frame(&self, r: Rect, color: Color) {
-        draw_rectangle_lines(r.x * self.s + self.ox, r.y * self.s, r.w * self.s, r.h * self.s, 2.0 * self.s.max(1.0), color);
+        draw_rectangle_lines(r.x * self.s + self.ox, r.y * self.s + self.oy, r.w * self.s, r.h * self.s, 2.0 * self.s.max(1.0), color);
     }
 
     /// Assombrit tout l'écran derrière un menu.
