@@ -41,6 +41,15 @@ arrière-plan du menu). Sur un serveur dédié, c'est le serveur qui la fixe : c
 `map` de `server.json`, option `--map` ou commande `map` de la console. Les
 joueurs connectés changent de carte sans se reconnecter.
 
+## Minimap
+
+En haut à droite, le plan de la carte vu du dessus, nord (côté Défenseurs) en
+haut. Votre flèche indique où vous regardez ; vos coéquipiers sont des points
+de leur couleur, les ennemis apparaissent en rouge tant que l'un de vous les
+voit (pas à travers les murs ni les fumées). On y voit aussi les sites A et B,
+les fumées, les flammes et la bombe (posée pour tous, au sol ou portée pour les
+Attaquants).
+
 ## Grenades
 
 Quatre grenades s'achètent dans le menu d'achat (quatre au maximum, une de

@@ -7,6 +7,7 @@ mod hud;
 mod keys;
 mod menu;
 mod netclient;
+mod radar;
 mod render;
 mod settings;
 mod textedit;

@@ -162,6 +162,8 @@ pub struct Game {
     pub debug_bought: bool,
     /// La carte vient de changer : le rendu du monde doit être refait.
     pub map_dirty: bool,
+    /// Plan de la minimap, refait au changement de carte.
+    pub radar: std::cell::RefCell<Option<crate::radar::Baked>>,
     /// Arme au sol visée, à portée de main : (identifiant, arme).
     pub aim_drop: Option<(u16, u8)>,
     pub pickup_cd: f32,
@@ -257,6 +259,7 @@ impl Game {
             debug_nade: None,
             debug_bought: false,
             map_dirty: false,
+            radar: Default::default(),
             aim_drop: None,
             pickup_cd: 0.0,
             debug_look: false,

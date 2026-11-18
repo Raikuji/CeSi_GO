@@ -5,6 +5,7 @@ use crate::audio::Audio;
 use crate::game::{Game, Overlay, Status};
 use crate::settings::{Action, Crosshair, Settings, NADE_ACTIONS};
 use crate::ui::{Ui, ACCENT, CT_COLOR, DIM, PANEL, TEXT, T_COLOR, WIDGET, WIDGET_HOT};
+use crate::radar;
 use crate::render::ss;
 use cesi_common::grenades::*;
 use cesi_common::protocol::*;
@@ -110,6 +111,10 @@ impl Game {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.66, 0.66, 0.68, alpha));
             }
         }
+        // --- Minimap (sous l'aveuglement : une grenade aveuglante la masque aussi) ---
+        let (rx, ry, rs) = radar::rect(w, h);
+        self.draw_radar(ui, rx, ry, rs);
+
         // --- Aveuglement : écran blanc qui se dissipe ---
         if self.blind_t > 0.0 {
             draw_rectangle(0.0, 0.0, w, h, Color::new(1.0, 1.0, 1.0, (self.blind_t / 1.3).min(1.0)));
@@ -145,8 +150,8 @@ impl Game {
         ui.shadow_px_c(&format!("{} en vie", alive(Team::T)), w / 2.0 - 100.0 * k, 47.0 * k, 12.0 * k, T_COLOR);
         ui.shadow_px_c(&format!("{} en vie", alive(Team::CT)), w / 2.0 + 100.0 * k, 47.0 * k, 12.0 * k, CT_COLOR);
 
-        // --- Éliminations ---
-        let mut y = 76.0 * k;
+        // --- Éliminations, sous la minimap ---
+        let mut y = ry + rs + 30.0 * k;
         for l in self.killfeed.iter().filter(|l| self.now - l.time < 7.0) {
             let mid = format!(" [{}{}] ", item_name(l.weapon), if l.headshot { " · tête" } else { "" });
             let size = 16.0 * k;
