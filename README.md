@@ -25,8 +25,14 @@ Deux exécutables sont produits dans `target/release/` :
   `cesi_go.exe --connect ip:port`. L'adresse peut être collée avec `Ctrl+V` ;
   les champs de texte acceptent la sélection à la souris et `Ctrl+A/C/X/V`.
 
-Les réglages (touches, sensibilité, viseur) se trouvent dans **Options** et
-sont enregistrés dans `%APPDATA%\CeSi_GO\settings.json`.
+Les réglages (touches, sensibilité, viseur, affichage) se trouvent dans
+**Options** et sont enregistrés dans `%APPDATA%\CeSi_GO\settings.json`.
+
+**Affichage** : fenêtré ou plein écran (`Alt+Entrée` bascule de l'un à
+l'autre). En fenêtré, la résolution est la taille de la fenêtre ; en plein
+écran, l'écran garde sa définition et la scène 3D est calculée à la
+résolution choisie puis agrandie (le HUD et les menus restent nets), ce qui
+allège la carte graphique.
 
 ## Cartes
 

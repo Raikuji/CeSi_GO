@@ -1267,10 +1267,12 @@ impl Game {
     }
 
     /// Dessine la scène 3D.
-    pub fn draw_world(&mut self, wr: &WorldRender, batch: &mut Batch) {
-        clear_background(render::SKY);
+    /// `target` : texture où calculer la scène (résolution réduite en plein écran),
+    /// sinon directement à l'écran.
+    pub fn draw_world(&mut self, wr: &WorldRender, batch: &mut Batch, target: Option<RenderTarget>) {
         let (eye, yaw, pitch) = (self.cam_pos, self.cam_yaw, self.cam_pitch);
         let fwd = dir_from_angles(yaw, pitch);
+        let offscreen = target.clone();
         set_camera(&Camera3D {
             position: eye,
             target: eye + fwd,
@@ -1278,8 +1280,10 @@ impl Game {
             fovy: self.cam_fovy,
             z_near: 0.03,
             z_far: 400.0,
+            render_target: target,
             ..Default::default()
         });
+        clear_background(render::SKY);
         wr.begin(eye);
         wr.draw(eye, fwd, self.cam_fovy);
 
@@ -1376,6 +1380,9 @@ impl Game {
         }
         set_default_camera();
         gl_use_default_material();
+        if let Some(rt) = offscreen {
+            crate::display::present(&rt);
+        }
     }
 
     /// Déconnexion propre.

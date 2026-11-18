@@ -188,6 +188,10 @@ pub struct Settings {
     pub fov: f32,
     pub volume: f32,
     pub fullscreen: bool,
+    /// Taille de la fenêtre en mode fenêtré.
+    pub window_size: [u32; 2],
+    /// Hauteur de rendu de la scène 3D en plein écran (0 = celle de l'écran).
+    pub render_height: u32,
     pub last_server: String,
     pub bot_skill: f32,
     pub bot_team_size: f32,
@@ -208,6 +212,8 @@ impl Default for Settings {
             fov: 90.0,
             volume: 0.7,
             fullscreen: false,
+            window_size: [1280, 720],
+            render_height: 0,
             last_server: "127.0.0.1:27500".into(),
             bot_skill: 50.0,
             bot_team_size: 5.0,

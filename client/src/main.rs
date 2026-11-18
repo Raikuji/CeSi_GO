@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
+mod display;
 mod game;
 mod hud;
 mod keys;
@@ -33,8 +34,9 @@ fn window_conf() -> macroquad::conf::Conf {
     macroquad::conf::Conf {
         miniquad_conf: Conf {
             window_title: "CeSi GO".to_owned(),
-            window_width: 1280,
-            window_height: 720,
+            // Taille enregistrée ; le plein écran est appliqué au premier affichage.
+            window_width: Settings::load().window_size[0].clamp(640, 7680) as i32,
+            window_height: Settings::load().window_size[1].clamp(360, 4320) as i32,
             high_dpi: true,
             sample_count: 4,
             ..Default::default()
@@ -154,6 +156,23 @@ async fn main() {
     if let Some(m) = args.iter().position(|a| a == "--map").and_then(|i| args.get(i + 1)).and_then(|a| map::find(a)) {
         settings.map = m;
     }
+    // Diagnostic : --display <hauteur> force le plein écran avec cette hauteur de rendu (0 = native),
+    // --display fenetre <l>x<h> force le mode fenêtré à cette taille.
+    if let Some(i) = args.iter().position(|a| a == "--display") {
+        match (args.get(i + 1).map(String::as_str), args.get(i + 2)) {
+            (Some("fenetre"), Some(sz)) => {
+                settings.fullscreen = false;
+                if let Some((w, h)) = sz.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))) {
+                    settings.window_size = [w, h];
+                }
+            }
+            (Some(h), _) => {
+                settings.fullscreen = true;
+                settings.render_height = h.parse().unwrap_or(0);
+            }
+            _ => {}
+        }
+    }
     let cam: Option<Vec<f32>> = args
         .iter()
         .position(|a| a == "--cam")
@@ -173,9 +192,7 @@ async fn main() {
     let mut wr = WorldRender::new(&world);
     let mut batch = Batch::new();
     let mut audio = Audio::new().await;
-    if settings.fullscreen {
-        set_fullscreen(true);
-    }
+    let mut screen = display::Display::new();
 
     let mut menu = MenuState::new();
     let mut game: Option<Game> = None;
@@ -189,6 +206,17 @@ async fn main() {
     loop {
         let dt = get_frame_time().min(0.1);
         audio.volume = settings.volume;
+        // Alt+Entrée bascule entre fenêtré et plein écran.
+        if (is_key_down(KeyCode::LeftAlt) || is_key_down(KeyCode::RightAlt))
+            && (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter))
+            && !matches!(game.as_ref().map(|g| g.overlay), Some(Overlay::Chat))
+        {
+            settings.fullscreen = !settings.fullscreen;
+            if persist {
+                settings.save();
+            }
+        }
+        screen.apply(&settings);
         ui.begin();
         if matches!(&shot, Some((m, _)) if m == "champ") {
             field_test(&mut field_step, &mut field_clip, &mut ui, &mut settings, &mut menu);
@@ -233,7 +261,7 @@ async fn main() {
                 info = g.info.clone();
                 wr.set_world(&world);
             }
-            g.draw_world(&wr, &mut batch);
+            g.draw_world(&wr, &mut batch, screen.scene_target(&settings));
             g.draw_hud(&settings, &ui);
             match g.overlay {
                 Overlay::None => {}

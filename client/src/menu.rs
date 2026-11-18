@@ -1,5 +1,6 @@
 //! Menu principal, écran de lancement, options (jeu, touches, viseur) et pause.
 
+use crate::display;
 use crate::hud::draw_crosshair;
 use crate::keys::ALL_KEYS;
 use crate::settings::{Bind, Settings, ACTIONS};
@@ -154,10 +155,11 @@ pub fn settings_panel(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) -> bool
 
 fn tab_game(ui: &mut Ui, s: &mut Settings) {
     let (lx, wx, vx) = (190.0, 520.0, 915.0);
-    let mut y = 220.0;
+    let row = 56.0;
+    let mut y = 214.0;
     ui.text("Pseudo", lx, y, 20.0, TEXT);
     ui.textfield(10, Rect::new(wx, y - 26.0, 300.0, 38.0), &mut s.name, 16);
-    y += 62.0;
+    y += row;
 
     ui.text("Sensibilité de la souris", lx, y, 20.0, TEXT);
     ui.slider(11, Rect::new(wx, y - 18.0, 370.0, 24.0), &mut s.sensitivity, 0.1, 8.0);
@@ -169,28 +171,48 @@ fn tab_game(ui: &mut Ui, s: &mut Settings) {
     if ui.button(Rect::new(1032.0, y - 24.0, 36.0, 34.0), "+", true) {
         s.sensitivity = (s.sensitivity + 0.05).min(20.0);
     }
-    y += 62.0;
+    y += row;
 
     ui.text("Sensibilité avec la lunette", lx, y, 20.0, TEXT);
     ui.slider(12, Rect::new(wx, y - 18.0, 370.0, 24.0), &mut s.zoom_sensitivity, 0.3, 2.0);
     ui.text(&format!("x {:.2}", s.zoom_sensitivity), vx, y, 20.0, ACCENT);
-    y += 62.0;
+    y += row;
 
     ui.text("Champ de vision", lx, y, 20.0, TEXT);
     ui.slider(13, Rect::new(wx, y - 18.0, 370.0, 24.0), &mut s.fov, 70.0, 110.0);
     s.fov = s.fov.round();
     ui.text(&format!("{:.0}°", s.fov), vx, y, 20.0, ACCENT);
-    y += 62.0;
+    y += row;
 
     ui.text("Volume", lx, y, 20.0, TEXT);
     ui.slider(14, Rect::new(wx, y - 18.0, 370.0, 24.0), &mut s.volume, 0.0, 1.0);
     ui.text(&format!("{:.0} %", s.volume * 100.0), vx, y, 20.0, ACCENT);
-    y += 62.0;
+    y += row;
 
-    if ui.checkbox(Rect::new(lx, y - 26.0, 300.0, 36.0), "Plein écran", &mut s.fullscreen) {
-        set_fullscreen(s.fullscreen);
+    // Affichage : appliqué à la fenêtre par la boucle principale (voir `display`).
+    ui.text("Affichage", lx, y, 20.0, TEXT);
+    for (i, name) in ["Fenêtré", "Plein écran"].iter().enumerate() {
+        if ui.tab(Rect::new(wx + i as f32 * 190.0, y - 27.0, 180.0, 38.0), name, s.fullscreen == (i == 1)) {
+            s.fullscreen = i == 1;
+        }
     }
-    ui.text("La sensibilité utilise la même échelle que les FPS classiques (0,022° par point).", lx, 580.0, 15.0, DIM);
+    ui.text("Alt+Entrée", vx, y, 16.0, DIM);
+    y += row;
+
+    ui.text("Résolution", lx, y, 20.0, TEXT);
+    if ui.button(Rect::new(wx, y - 27.0, 38.0, 38.0), "‹", true) {
+        display::cycle(s, -1);
+    }
+    let r = Rect::new(wx + 46.0, y - 27.0, 278.0, 38.0);
+    ui.rect(r, crate::ui::WIDGET);
+    ui.text_c(&display::label(s), r.x + r.w / 2.0, y - 1.0, 19.0, ACCENT);
+    if ui.button(Rect::new(wx + 332.0, y - 27.0, 38.0, 38.0), "›", true) {
+        display::cycle(s, 1);
+    }
+    let hint = if s.fullscreen { "rendu de la scène 3D" } else { "taille de la fenêtre" };
+    ui.text(hint, vx, y, 16.0, DIM);
+
+    ui.text("Sensibilité : même échelle que les FPS classiques (0,022° par point).", 400.0, 645.0, 15.0, DIM);
 }
 
 fn tab_keys(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) {
