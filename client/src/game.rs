@@ -170,6 +170,8 @@ pub struct Game {
     pub blind_t: f32,
     pub nade_views: Vec<NadeSnap>,
     pub fire_snd: f64,
+    /// Sons de pose / désamorçage : action en cours et prochain son, par joueur.
+    pub action_snd: HashMap<PlayerId, (u8, f64)>,
     pub debug_nade: Option<u8>,
     pub debug_bought: bool,
     /// La carte vient de changer : le rendu du monde doit être refait.
@@ -304,6 +306,7 @@ impl Game {
             blind_t: 0.0,
             nade_views: Vec::new(),
             fire_snd: 0.0,
+            action_snd: HashMap::new(),
             debug_nade: None,
             debug_bought: false,
             map_dirty: false,
@@ -1187,6 +1190,36 @@ impl Game {
             if let Some(pos) = fire {
                 self.fire_snd = self.now;
                 audio.play_at("fire", self.cam_pos, pos, 28.0, 0.7);
+            }
+        }
+
+        // Pose (code tapé sur le clavier de la bombe) et désamorçage (outils), audibles par tous.
+        for i in 0..self.views.len() {
+            let v = &self.views[i];
+            let (id, pos) = (v.id, v.pos + Vec3::Y * 0.4);
+            let action = if v.alive && (v.action == 1 || v.action == 2) { v.action } else { 0 };
+            let prev = self.action_snd.get(&id).copied();
+            if action == 0 {
+                if prev.is_some() {
+                    self.action_snd.remove(&id);
+                }
+                continue;
+            }
+            let (last, next) = prev.unwrap_or((0, 0.0));
+            if last != action {
+                // Début de l'action : on ouvre la bombe ou le boîtier.
+                audio.play_at(if action == 1 { "bomb_open" } else { "defuse_open" }, self.cam_pos, pos, 30.0, 0.9);
+                self.action_snd.insert(id, (action, self.now + 0.4));
+            } else if self.now >= next {
+                let (name, gap) = if action == 1 {
+                    (["bomb_key0", "bomb_key1", "bomb_key2", "bomb_key3"][self.rng.below(4)], self.rng.range(0.16, 0.3))
+                } else if self.rng.below(4) == 0 {
+                    ("defuse_snip", self.rng.range(0.35, 0.5))
+                } else {
+                    ("defuse_tick", self.rng.range(0.32, 0.45))
+                };
+                audio.play_at(name, self.cam_pos, pos, 30.0, 0.75);
+                self.action_snd.insert(id, (action, self.now + gap as f64));
             }
         }
 

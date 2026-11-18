@@ -94,6 +94,17 @@ fn thud(dur: f32, lowpass: f32, decay: f32, gain: f32, seed: u32) -> Vec<f32> {
         .collect()
 }
 
+/// Superpose deux sons (le plus long donne la durée).
+fn mix(a: Vec<f32>, b: Vec<f32>) -> Vec<f32> {
+    let n = a.len().max(b.len());
+    (0..n).map(|i| a.get(i).unwrap_or(&0.0) + b.get(i).unwrap_or(&0.0)).collect()
+}
+
+/// Touche du clavier de la bombe : petit bip électronique sur un clic de bouton.
+fn key(freq: f32, seed: u32) -> Vec<f32> {
+    mix(tone(0.075, &[freq, freq * 1.5], 38.0), clicks(0.03, &[0.0], seed))
+}
+
 fn explosion() -> Vec<f32> {
     let mut nz = Noise(77);
     let mut lp = 0.0;
@@ -143,6 +154,16 @@ impl Audio {
             ("ignite", thud(0.9, 0.16, 4.0, 3.2, 24)),
             ("fire", thud(0.55, 0.3, 4.5, 1.1, 25)),
             ("throw", thud(0.2, 0.45, 18.0, 1.0, 26)),
+            // Pose de la bombe : on l'ouvre, puis on tape le code.
+            ("bomb_open", mix(clicks(0.3, &[0.0, 0.09, 0.17], 31), thud(0.25, 0.2, 14.0, 1.4, 32))),
+            ("bomb_key0", key(1180.0, 33)),
+            ("bomb_key1", key(1320.0, 34)),
+            ("bomb_key2", key(1480.0, 35)),
+            ("bomb_key3", key(1570.0, 36)),
+            // Désamorçage : on ouvre le boîtier, puis cliquetis d'outil et fils coupés.
+            ("defuse_open", clicks(0.34, &[0.0, 0.11, 0.13, 0.25], 37)),
+            ("defuse_tick", mix(clicks(0.16, &[0.0, 0.035, 0.07, 0.105], 38), tone(0.05, &[2600.0, 3900.0], 70.0))),
+            ("defuse_snip", mix(clicks(0.06, &[0.0, 0.006], 39), tone(0.12, &[5200.0, 5240.0], 40.0))),
         ];
         let mut sounds = HashMap::new();
         for (name, samples) in defs {
@@ -177,6 +198,50 @@ impl Audio {
             Class::Rifle => "rifle",
             Class::Sniper => "sniper",
             Class::Lmg => "lmg",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Les sons de la bombe sont audibles sans saturer. Avec `CESI_WAV_DIR`, ils sont
+    /// aussi enregistrés en WAV (pose puis désamorçage enchaînés) pour les écouter.
+    #[test]
+    fn bomb_sounds_are_audible_and_not_clipped() {
+        let open = mix(clicks(0.3, &[0.0, 0.09, 0.17], 31), thud(0.25, 0.2, 14.0, 1.4, 32));
+        let keys: Vec<Vec<f32>> = [1180.0, 1320.0, 1480.0, 1570.0].iter().enumerate().map(|(i, f)| key(*f, 33 + i as u32)).collect();
+        let dopen = clicks(0.34, &[0.0, 0.11, 0.13, 0.25], 37);
+        let tick = mix(clicks(0.16, &[0.0, 0.035, 0.07, 0.105], 38), tone(0.05, &[2600.0, 3900.0], 70.0));
+        let snip = mix(clicks(0.06, &[0.0, 0.006], 39), tone(0.12, &[5200.0, 5240.0], 40.0));
+        for s in keys.iter().chain([&open, &dopen, &tick, &snip]) {
+            let peak = s.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            assert!(peak > 0.15 && peak <= 1.0, "crête {}", peak);
+        }
+        if let Ok(dir) = std::env::var("CESI_WAV_DIR") {
+            // Enchaînement : ouverture, 12 touches, pause, puis désamorçage.
+            let at = |out: &mut Vec<f32>, t: f32, s: &[f32]| {
+                let o = (t * RATE) as usize;
+                out.resize(out.len().max(o + s.len()), 0.0);
+                for (i, v) in s.iter().enumerate() {
+                    out[o + i] += v;
+                }
+            };
+            let mut plant = Vec::new();
+            at(&mut plant, 0.0, &open);
+            for i in 0..12 {
+                at(&mut plant, 0.4 + i as f32 * 0.23, &keys[(i * 7 + i / 3) % 4]);
+            }
+            at(&mut plant, 3.5, &melody(&[(880.0, 0.1), (660.0, 0.1), (880.0, 0.2)]));
+            let mut defuse = Vec::new();
+            at(&mut defuse, 0.0, &dopen);
+            for i in 0..12 {
+                at(&mut defuse, 0.4 + i as f32 * 0.4, if i % 4 == 3 { &snip } else { &tick });
+            }
+            at(&mut defuse, 5.3, &melody(&[(660.0, 0.1), (880.0, 0.1), (1320.0, 0.3)]));
+            std::fs::write(format!("{}/pose_bombe.wav", dir), wav(&plant)).unwrap();
+            std::fs::write(format!("{}/desamorcage.wav", dir), wav(&defuse)).unwrap();
         }
     }
 }
