@@ -3,7 +3,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL: u16 = 10;
+pub const PROTOCOL: u16 = 11;
 pub const DEFAULT_PORT: u16 = 27500;
 pub const TICK_RATE: u32 = 60;
 /// Dégâts à infliger à un adversaire, sans l'achever, pour compter une assistance.
@@ -106,6 +106,8 @@ pub enum ClientMsg {
     Drop { slot: u8, mag: u16, reserve: u16 },
     /// Le porteur lâche la bombe devant lui (pour la donner à un coéquipier).
     DropBomb,
+    /// Signale un point à son équipe (là où l'on vise).
+    Ping { pos: Vec3 },
     SwitchTeam,
     Chat(String),
 }
@@ -156,6 +158,8 @@ pub enum ServerMsg {
     /// Arme ramassée au sol, avec les munitions qu'elle contenait.
     /// `auto` : ramassée en passant dessus.
     Picked { weapon: u8, mag: u16, reserve: u16, auto: bool },
+    /// Point signalé par un coéquipier (ou par soi-même).
+    Ping { from: PlayerId, pos: Vec3 },
     /// Objets revendables maintenant et montant rendu, envoyé quand la liste change.
     Refunds(Vec<(BuyItem, u32)>),
     Chat { from: String, team: Option<Team>, text: String },

@@ -296,6 +296,25 @@ mod tests {
     }
 
     #[test]
+    fn pings_go_to_teammates_only_and_not_too_often() {
+        let mut s = server();
+        for (id, team) in [(2, Team::T), (3, Team::CT)] {
+            let mut p = Player::new(id, format!("J{}", id), team, 800, None);
+            p.alive = true;
+            s.players.push(p);
+        }
+        let spot = s.players[0].pos + vec3(3.0, 0.0, 5.0);
+        assert_eq!(s.ping_recipients(0, spot), vec![1, 2], "le joueur et son coéquipier, pas l'adversaire");
+        assert!(s.ping_recipients(0, spot).is_empty(), "trop rapproché");
+        s.time += 1.0;
+        assert!(s.ping_recipients(0, vec3(-50.0, 0.0, 0.0)).is_empty(), "hors de la carte");
+        assert_eq!(s.ping_recipients(0, spot).len(), 2);
+        s.time += 1.0;
+        s.players[0].alive = false;
+        assert!(s.ping_recipients(0, spot).is_empty(), "pas de signalement une fois mort");
+    }
+
+    #[test]
     fn exchange_leaves_the_old_weapon_with_its_ammo() {
         let mut s = server();
         s.players[0].primary = 7;

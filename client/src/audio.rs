@@ -154,6 +154,7 @@ impl Audio {
             ("ignite", thud(0.9, 0.16, 4.0, 3.2, 24)),
             ("fire", thud(0.55, 0.3, 4.5, 1.1, 25)),
             ("throw", thud(0.2, 0.45, 18.0, 1.0, 26)),
+            ("ping", melody(&[(1320.0, 0.07), (1760.0, 0.16)])),
             // Pose de la bombe : on l'ouvre, puis on tape le code.
             ("bomb_open", mix(clicks(0.3, &[0.0, 0.09, 0.17], 31), thud(0.25, 0.2, 14.0, 1.4, 32))),
             ("bomb_key0", key(1180.0, 33)),

@@ -174,6 +174,10 @@ pub struct Game {
     pub blind_t: f32,
     pub nade_views: Vec<NadeSnap>,
     pub fire_snd: f64,
+    /// Points signalés par l'équipe : (auteur, position, heure), un par joueur.
+    pub pings: Vec<(PlayerId, Vec3, f64)>,
+    /// Diagnostic : signale le point visé quelques secondes après le début.
+    pub debug_ping: bool,
     /// Sons de pose / désamorçage : action en cours et prochain son, par joueur.
     pub action_snd: HashMap<PlayerId, (u8, f64)>,
     pub debug_nade: Option<u8>,
@@ -313,6 +317,8 @@ impl Game {
             blind_t: 0.0,
             nade_views: Vec::new(),
             fire_snd: 0.0,
+            pings: Vec::new(),
+            debug_ping: false,
             action_snd: HashMap::new(),
             debug_nade: None,
             debug_bought: false,
@@ -577,8 +583,14 @@ impl Game {
                 }
             }
             ServerMsg::Refunds(list) => self.refunds = list,
+            ServerMsg::Ping { from, pos } => {
+                self.pings.retain(|(f, _, _)| *f != from);
+                self.pings.push((from, pos, self.now));
+                audio.play("ping", 0.6);
+            }
             ServerMsg::RoundStart { round } => {
                 self.round_dmg.clear();
+                self.pings.clear();
                 self.corpses.clear();
                 self.particles.clear();
                 self.tracers.clear();
@@ -1010,6 +1022,15 @@ impl Game {
                     self.pickup_cd = 0.6;
                     self.debug_drop = false;
                     audio.play("throw", 0.5);
+                }
+                // Signaler à l'équipe le point visé.
+                let auto_ping = self.debug_ping && self.now - self.start > 7.0;
+                if st.pressed(Action::Ping) || auto_ping {
+                    self.debug_ping = false;
+                    let dir = dir_from_angles(self.cam_yaw, self.cam_pitch);
+                    if let Some(hit) = self.world.raycast(self.cam_pos, dir, 250.0) {
+                        self.net.reliable(ClientMsg::Ping { pos: self.cam_pos + dir * (hit.dist - 0.05) });
+                    }
                 }
                 // Lâcher la bombe devant soi, pour qu'un coéquipier la ramasse.
                 let auto_bomb = self.debug_drop_bomb && self.now - self.start > 7.0;

@@ -61,6 +61,14 @@ Attaquants).
 Une fois éliminé, le coin haut gauche affiche les dégâts infligés pendant le
 round : joueur touché, nombre de touches, éliminations et total.
 
+## Signaler un point
+
+Le clic molette (réglable : « Signaler un point ») place un losange jaune là où
+vous visez. Toute votre équipe le voit pendant 7 s, à l'écran (avec votre nom
+et la distance, ramené au bord de l'écran s'il est hors champ) et sur la
+minimap, avec un petit bip. Un nouveau signalement remplace le précédent ; les
+adversaires ne le voient pas.
+
 ## Bombe
 
 Un attaquant reçoit la bombe au début de chaque round. Si le porteur meurt,

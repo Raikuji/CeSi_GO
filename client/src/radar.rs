@@ -10,12 +10,22 @@ use crate::game::Game;
 use crate::ui::{Ui, CT_COLOR, T_COLOR};
 use cesi_common::grenades::{FIRE, FIRE_RADIUS, SMOKE, SMOKE_RADIUS, SMOKE_TIME};
 use cesi_common::map::MapInfo;
-use cesi_common::protocol::{BombState, Team};
+use cesi_common::protocol::{BombState, PlayerId, Team};
 use cesi_common::voxel::{block_color, World, VS};
 use macroquad::prelude::*;
 
 /// Côté de la zone montrée par la minimap, en mètres.
 pub const VIEW: f32 = 68.0;
+
+/// Durée d'affichage d'un point signalé, en secondes.
+pub const PING_TIME: f64 = 7.0;
+const PING_COLOR: Color = Color::new(1.0, 0.85, 0.25, 1.0);
+
+/// Losange de signalement, contouré de noir.
+fn diamond(c: Vec2, r: f32, color: Color) {
+    draw_poly(c.x, c.y, 4, r + 2.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.8 * color.a));
+    draw_poly(c.x, c.y, 4, r, 0.0, color);
+}
 
 /// Hauteur franchissable d'une case à l'autre (en voxels), saut compris.
 const CLIMB: i32 = 2;
@@ -150,6 +160,45 @@ fn dot(c: Vec2, r: f32, fill: Color) {
 }
 
 impl Game {
+    /// Points signalés encore affichés : (auteur, position, âge en secondes).
+    fn live_pings(&self) -> impl Iterator<Item = (PlayerId, Vec3, f32)> + '_ {
+        self.pings.iter().filter(|(_, _, t)| self.now - t < PING_TIME).map(|(f, p, t)| (*f, *p, (self.now - t) as f32))
+    }
+
+    /// Points signalés, à l'écran : un losange sur le point (ou au bord de l'écran,
+    /// dans sa direction, s'il est hors champ), avec l'auteur et la distance.
+    pub fn draw_pings(&self, ui: &Ui) {
+        let (w, h) = (screen_width(), screen_height());
+        let k = h / 720.0;
+        let fwd = cesi_common::dir_from_angles(self.cam_yaw, self.cam_pitch);
+        let vp = Mat4::perspective_rh_gl(self.cam_fovy, w / h, 0.03, 400.0) * Mat4::look_at_rh(self.cam_pos, self.cam_pos + fwd, Vec3::Y);
+        let margin = 34.0 * k;
+        for (from, pos, age) in self.live_pings() {
+            let fade = (PING_TIME as f32 - age).min(1.0);
+            let clip = vp * pos.extend(1.0);
+            let behind = clip.w <= 0.0;
+            let mut ndc = vec2(clip.x, clip.y) / clip.w.abs().max(1e-4);
+            if behind {
+                ndc = -ndc;
+            }
+            let mut sp = vec2((ndc.x + 1.0) * 0.5 * w, (1.0 - ndc.y) * 0.5 * h);
+            if behind || sp.x < margin || sp.x > w - margin || sp.y < margin || sp.y > h - margin {
+                // Hors champ : ramené au bord de l'écran, dans la direction du point.
+                let c = vec2(w / 2.0, h / 2.0);
+                let d = if (sp - c).length() < 1.0 { vec2(0.0, 1.0) } else { sp - c };
+                let t = ((w / 2.0 - margin) / d.x.abs().max(1e-3)).min((h / 2.0 - margin) / d.y.abs().max(1e-3));
+                sp = c + d * t;
+            }
+            // Le losange grossit un instant à l'apparition.
+            let pop = 1.0 + (1.0 - age / 0.4).max(0.0);
+            let col = Color { a: fade, ..PING_COLOR };
+            diamond(sp, 8.0 * k * pop, col);
+            let name = self.player(from).map_or(String::new(), |p| p.name.clone());
+            let label = format!("{} · {:.0} m", name, pos.distance(self.cam_pos));
+            ui.shadow_px_c(&label, sp.x, sp.y + 26.0 * k, 14.0 * k, col);
+        }
+    }
+
     /// Un ennemi en `target` est-il vu par un membre vivant de l'équipe `team` ?
     /// Il faut une ligne de vue dégagée, hors fumée, dans le champ de vision.
     fn spotted(&self, target: Vec3, team: Team) -> bool {
@@ -278,6 +327,13 @@ impl Game {
                 draw_rectangle(c.x - 5.0 * k, c.y - 4.0 * k, 10.0 * k, 8.0 * k, col);
             }
             _ => {}
+        }
+
+        // Points signalés : au bord de la vue s'ils sont plus loin.
+        for (_, pos, age) in self.live_pings() {
+            let c = to(pos).clamp(vec2(x + 6.0 * k, y + 6.0 * k), vec2(x + s - 6.0 * k, y + s - 6.0 * k));
+            let col = Color { a: (PING_TIME as f32 - age).min(1.0), ..PING_COLOR };
+            diamond(c, 5.5 * k * (1.0 + (1.0 - age / 0.4).max(0.0)), col);
         }
 
         // Joueurs : coéquipiers, puis ennemis repérés, puis soi-même par-dessus.

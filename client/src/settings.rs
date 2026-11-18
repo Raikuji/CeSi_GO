@@ -35,10 +35,11 @@ pub enum Action {
     NadeFlash,
     NadeFire,
     Chat,
+    Ping,
 }
 
 /// (action, identifiant dans le fichier, libellé du menu)
-pub const ACTIONS: [(Action, &str, &str); 24] = [
+pub const ACTIONS: [(Action, &str, &str); 25] = [
     (Action::Forward, "forward", "Avancer"),
     (Action::Back, "back", "Reculer"),
     (Action::Left, "left", "Gauche"),
@@ -63,6 +64,7 @@ pub const ACTIONS: [(Action, &str, &str); 24] = [
     (Action::NadeFlash, "nade_flash", "Grenade aveuglante"),
     (Action::NadeFire, "nade_fire", "Grenade incendiaire"),
     (Action::Chat, "chat", "Discussion"),
+    (Action::Ping, "ping", "Signaler un point"),
 ];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -146,6 +148,7 @@ fn default_bind(a: Action) -> Bind {
         Action::NadeFlash => Bind::Key(KeyCode::Key7),
         Action::NadeFire => Bind::Key(KeyCode::Key8),
         Action::Chat => Bind::Key(KeyCode::Y),
+        Action::Ping => Bind::Mouse(MouseButton::Middle),
     }
 }
 

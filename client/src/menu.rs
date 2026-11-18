@@ -238,11 +238,11 @@ fn tab_keys(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) {
         }
     }
     for (i, (action, _, label)) in ACTIONS.iter().enumerate() {
-        let (col, row) = (i / 12, i % 12);
+        let (col, row) = (i / 13, i % 13);
         let x = 180.0 + col as f32 * 480.0;
-        let y = 168.0 + row as f32 * 37.0;
-        ui.text(label, x, y + 22.0, 18.0, TEXT);
-        let r = Rect::new(x + 270.0, y, 180.0, 32.0);
+        let y = 166.0 + row as f32 * 34.0;
+        ui.text(label, x, y + 21.0, 18.0, TEXT);
+        let r = Rect::new(x + 270.0, y, 180.0, 30.0);
         if st.rebinding == Some(i) {
             ui.rect(r, ACCENT);
             ui.text_c("Appuyez…", r.x + r.w / 2.0, r.y + 22.0, 17.0, BLACK);

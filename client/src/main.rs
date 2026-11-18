@@ -334,7 +334,7 @@ async fn main() {
                     menu.screen = Screen::Settings;
                     menu.tab = ["options", "touches", "viseur"].iter().position(|m| m == mode).unwrap_or(0);
                 }
-                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" | "nade" | "main" | "sol" | "echange" | "jeter" | "degats" | "revente" | "bombe"
+                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" | "nade" | "main" | "sol" | "echange" | "jeter" | "degats" | "revente" | "bombe" | "ping"
                     if game.is_none() && start.is_none() =>
                 {
                     start = Some(true);
@@ -372,6 +372,10 @@ async fn main() {
             // « sol » regarde par terre ; « echange » ramasse en plus les armes visées (deux fois).
             // « jeter » jette l'arme en main puis regarde où elle est tombée.
             // « bombe » : le porteur lâche la bombe puis regarde où elle est tombée.
+            // « ping » : signale le point visé, puis capture le marqueur.
+            if mode == "ping" && !g.debug_ping && g.pings.is_empty() && g.now - g.start < 6.0 {
+                g.debug_ping = true;
+            }
             if mode == "bombe" && !g.has_bomb() && !g.debug_look {
                 if let (Some(srv), Some(me)) = (server.as_ref(), g.me()) {
                     if me.alive && me.team == cesi_common::protocol::Team::T {

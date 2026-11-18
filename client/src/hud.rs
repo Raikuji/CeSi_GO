@@ -111,6 +111,9 @@ impl Game {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.66, 0.66, 0.68, alpha));
             }
         }
+        // --- Points signalés par l'équipe ---
+        self.draw_pings(ui);
+
         // --- Minimap (sous l'aveuglement : une grenade aveuglante la masque aussi) ---
         let (rx, ry, rs) = radar::rect(w, h);
         self.draw_radar(ui, rx, ry, rs);

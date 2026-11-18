@@ -27,6 +27,9 @@ const ROUND_END_TIME: f32 = 5.0;
 const MATCH_END_TIME: f32 = 12.0;
 const MONEY_MAX: u32 = 16000;
 const TIMEOUT: f64 = 8.0;
+/// Délai minimal entre deux signalements d'un même joueur, en secondes.
+const PING_COOLDOWN: f64 = 0.6;
+
 const BOT_NAMES: [&str; 16] = [
     "Gaston", "Lucien", "Marcel", "Odile", "Fernand", "Yvette", "Raymond", "Ginette", "Albert", "Suzanne", "Léon",
     "Paulette", "Honoré", "Colette", "Firmin", "Josette",
@@ -125,6 +128,8 @@ pub struct Player {
     fire_budget: f32,
     switch_team: bool,
     last_state: u32,
+    /// Heure du dernier signalement (cadence limitée).
+    pub(crate) last_ping: f64,
     /// Achats du round, revendables tant que les achats sont ouverts.
     pub(crate) bought: Vec<crate::shop::Purchase>,
     /// Dernière liste de reventes envoyée au joueur.
@@ -170,6 +175,7 @@ impl Player {
             bought: Vec::new(),
             refunds_sent: Vec::new(),
             last_state: 0,
+            last_ping: -10.0,
         }
     }
 
@@ -495,6 +501,20 @@ impl Server {
         }
     }
 
+    /// Destinataires d'un signalement du joueur `i` en `pos` : son équipe (lui compris).
+    /// Refusé s'il est mort, si le point est hors de la carte ou s'il signale trop souvent.
+    pub(crate) fn ping_recipients(&mut self, i: usize, pos: Vec3) -> Vec<PlayerId> {
+        let size = vec3(self.world.sx as f32, self.world.sy as f32, self.world.sz as f32) * cesi_common::voxel::VS;
+        let p = &mut self.players[i];
+        let inside = pos.is_finite() && pos.cmpge(Vec3::ZERO).all() && pos.cmple(size).all();
+        if !p.alive || !inside || self.time - p.last_ping < PING_COOLDOWN {
+            return Vec::new();
+        }
+        p.last_ping = self.time;
+        let team = p.team;
+        self.players.iter().filter(|q| q.team == team && !q.is_bot).map(|q| q.id).collect()
+    }
+
     fn broadcast_except(&mut self, pid: PlayerId, msg: ServerMsg) {
         for c in self.conns.values_mut().filter(|c| c.pid != pid) {
             c.chan.send_reliable(msg.clone());
@@ -587,6 +607,12 @@ impl Server {
             ClientMsg::Pickup { id, mag, reserve } => self.pickup(i, id, mag, reserve, false),
             ClientMsg::Drop { slot, mag, reserve } => self.throw_weapon(i, slot, mag, reserve),
             ClientMsg::DropBomb => self.drop_bomb(i),
+            ClientMsg::Ping { pos } => {
+                for pid in self.ping_recipients(i, pos) {
+                    let from = self.players[i].id;
+                    self.send_to(pid, ServerMsg::Ping { from, pos });
+                }
+            }
             ClientMsg::Buy(item) => {
                 self.try_buy(i, item);
             }
