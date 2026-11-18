@@ -1,6 +1,7 @@
-//! Cartes du jeu : « Comptoir », « Entrepôt » et « Citadelle ».
+//! Cartes du jeu : « Comptoir », « Entrepôt », « Citadelle » et « Gare ».
 //! Chaque carte est générée par le code, à l'identique sur le client et le serveur,
-//! à partir d'un plan de 16 x 16 tuiles puis d'un décor posé à la main.
+//! à partir d'un plan de tuiles (16 x 16, ou 32 x 32 pour la Gare) puis d'un décor
+//! posé à la main.
 //!
 //! Pour ajouter une carte : un plan, une fonction de décor, une entrée dans `MAPS`
 //! et dans `build`. Deux règles tirées des simulations de bots (`--fast`) :
@@ -25,10 +26,11 @@ pub struct MapDef {
 }
 
 /// Cartes disponibles ; l'indice sert d'identifiant sur le réseau.
-pub const MAPS: [MapDef; 3] = [
+pub const MAPS: [MapDef; 4] = [
     MapDef { name: "Comptoir", desc: "Ville du désert : trois couloirs, les deux sites au nord." },
     MapDef { name: "Entrepôt", desc: "Zone portuaire : halle couverte pour B, quai à conteneurs pour A." },
     MapDef { name: "Citadelle", desc: "Forteresse enneigée : les deux sites dans la cour, sous le rempart." },
+    MapDef { name: "Gare", desc: "Gare de triage quatre fois plus vaste : voies et wagons à traverser." },
 ];
 
 /// Minuscules sans accents, pour comparer les noms saisis à la console.
@@ -92,6 +94,7 @@ pub fn build(id: u8) -> (World, MapInfo) {
     match id {
         1 => entrepot(),
         2 => citadelle(),
+        3 => gare(),
         _ => comptoir(),
     }
 }
@@ -126,8 +129,9 @@ fn hash2(x: i32, z: i32) -> u32 {
 
 /// Pose les tuiles du plan vu de dessus, la première ligne étant au nord (z maximal).
 /// `#` bâtiment, `.` sol, `A`/`B` sites, `C` départ défenseurs, `T` départ attaquants.
-fn lay(layout: &[&str; 16], th: &Theme) -> (World, Spawns, Spawns) {
-    let n = 16 * TS;
+fn lay(layout: &[&str], th: &Theme) -> (World, Spawns, Spawns) {
+    let nt = layout.len() as i32;
+    let n = nt * TS;
     let mut w = World::new(n, 40, n);
     w.fill(0, 0, 0, n - 1, G - 1, n - 1, th.ground);
 
@@ -135,7 +139,7 @@ fn lay(layout: &[&str; 16], th: &Theme) -> (World, Spawns, Spawns) {
     let mut ct_spawns = Vec::new();
 
     for (r, row) in layout.iter().enumerate() {
-        let tz = 15 - r as i32;
+        let tz = nt - 1 - r as i32;
         for (tx, ch) in row.bytes().enumerate() {
             let tx = tx as i32;
             let (x0, z0) = (tx * TS, tz * TS);
@@ -143,7 +147,7 @@ fn lay(layout: &[&str; 16], th: &Theme) -> (World, Spawns, Spawns) {
             let centre = vec3((x0 + TS / 2) as f32 * VS, G as f32 * VS + 0.01, (z0 + TS / 2) as f32 * VS);
             match ch {
                 b'#' => {
-                    let border = tx == 0 || tz == 0 || tx == 15 || tz == 15;
+                    let border = tx == 0 || tz == 0 || tx == nt - 1 || tz == nt - 1;
                     let h = hash2(tx, tz);
                     let height = if border { 18 } else { th.h0 + (h % th.hn) as i32 * 2 };
                     let mat = th.walls[(h / 3 % 4) as usize];
@@ -672,6 +676,191 @@ fn citadelle() -> (World, MapInfo) {
         ct_spawns,
         sites: [zone(24, 64, 47, 87, 1.8, 4.6), zone(80, 64, 103, 87, 1.8, 4.6)],
         buy_zones: [zone(24, 8, 103, 31, 1.5, 6.0), zone(40, 104, 87, 119, 1.5, 6.0)],
+    };
+    (w, info)
+}
+
+// ---------------------------------------------------------------------------
+// Gare : grande gare de triage (32 x 32 tuiles, 128 m de côté). Les attaquants
+// partent du sud, traversent les rues puis les voies encombrées de wagons. Au
+// nord, le hall des défenseurs ouvre sur les deux sites : le dépôt (B) à l'ouest,
+// le quai de marchandises (A) à l'est. Le parvis devant le hall, surveillé depuis
+// les deux sites, est le chemin le plus court ; les couloirs extérieurs sont des
+// détours. (Avec des sites éloignés l'un de l'autre, les défenseurs se faisaient
+// déborder site par site : 82 % de victoires des attaquants.)
+
+const GARE: [&str; 32] = [
+    "################################",
+    "##############CCCC##############",
+    "##...#BBBBBB..CCCC..AAAAAA#...##",
+    "##....BBBBBB..CCCC..AAAAAA....##",
+    "##....BBBBBB#......#AAAAAA....##",
+    "##....BBBBBB........AAAAAA....##",
+    "##...#BBBBBB#......#AAAAAA#...##",
+    "##...########......########...##",
+    "##...########......########...##",
+    "##...########......########...##",
+    "##...########......########...##",
+    "##...########......########...##",
+    "##...########......########...##",
+    "#..............................#",
+    "#..............................#",
+    "#..............................#",
+    "#..............................#",
+    "#..............................#",
+    "#..............................#",
+    "####..########....########..####",
+    "####..########....########..####",
+    "####..########....########..####",
+    "##............................##",
+    "##............................##",
+    "##....########....########....##",
+    "##....########....########....##",
+    "#..............................#",
+    "#..............................#",
+    "#..........TTTTTTTTTT..........#",
+    "#..........TTTTTTTTTT..........#",
+    "#..............................#",
+    "################################",
+];
+
+/// Wagon de marchandises de `len` voxels posé à la hauteur `y`, sur 5 voxels de
+/// large à partir de `z` ; `tank` : wagon-citerne, plus bas et arrondi.
+#[allow(clippy::too_many_arguments)]
+fn wagon(w: &mut World, x: i32, y: i32, z: i32, len: i32, color: u8, tank: bool) {
+    let x1 = x + len - 1;
+    w.fill(x, y, z, x1, y, z + 4, METAL); // châssis
+    if tank {
+        w.fill(x + 1, y + 1, z + 1, x1 - 1, y + 4, z + 3, color);
+        w.fill(x + 1, y + 2, z, x1 - 1, y + 3, z + 4, color);
+        w.fill(x + len / 2 - 1, y + 5, z + 1, x + len / 2, y + 5, z + 3, METAL);
+    } else {
+        w.fill(x, y + 1, z, x1, y + 5, z + 4, color);
+        w.fill(x, y + 6, z, x1, y + 6, z + 4, ROOF);
+        let m = x + len / 2;
+        w.fill(m - 2, y + 1, z, m + 1, y + 4, z, DARKWOOD);
+        w.fill(m - 2, y + 1, z + 4, m + 1, y + 4, z + 4, DARKWOOD);
+    }
+}
+
+/// Voiture garée de 4 m x 2 m.
+fn car(w: &mut World, x: i32, z: i32, along_x: bool, color: u8) {
+    let (dx, dz) = if along_x { (7, 3) } else { (3, 7) };
+    w.fill(x, G, z, x + dx, G + 1, z + dz, color);
+    let (cx0, cz0, cx1, cz1) = if along_x { (x + 2, z, x + 5, z + 3) } else { (x, z + 2, x + 3, z + 5) };
+    w.fill(cx0, G + 2, cz0, cx1, G + 2, cz1, WHITE);
+    w.fill(cx0, G + 3, cz0, cx1, G + 3, cz1, color);
+}
+
+fn gare() -> (World, MapInfo) {
+    let theme = Theme {
+        ground: ASPHALT,
+        walls: [BRICK, CONCRETE, PLASTER, BRICK],
+        base: STONE,
+        roof: ROOF,
+        h0: 14,
+        hn: 3,
+        site: CONCRETE,
+        t_floor: PAVE,
+        ct_floor: PAVE,
+    };
+    let (mut w, t_spawns, ct_spawns) = lay(&GARE, &theme);
+
+    // --- Sols ---
+    w.fill(8, G - 1, 104, 247, G - 1, 151, STONE); // ballast de la gare de triage
+    w.fill(104, G - 1, 152, 151, G - 1, 223, PAVE); // parvis de la gare
+
+    // --- Voies ferrées, peintes au sol (on marche dessus) ---
+    for z in [108, 118, 134, 144] {
+        for x in (8..248).step_by(3) {
+            w.fill(x, G - 1, z - 1, x, G - 1, z + 4, DARKWOOD);
+        }
+        w.fill(8, G - 1, z, 247, G - 1, z, METAL);
+        w.fill(8, G - 1, z + 3, 247, G - 1, z + 3, METAL);
+    }
+    // --- Wagons : des abris pour traverser, en quinconce (passages d'au moins 4 m) ---
+    let trains: [(i32, &[(i32, i32, u8, bool)]); 4] = [
+        (107, &[(14, 24, RUST, false), (56, 24, BLUE, false), (100, 20, WHITE, true), (150, 24, GREEN, false), (196, 24, RUST, false)]),
+        (117, &[(30, 24, GREEN, false), (78, 24, RUST, false), (128, 24, BLUE, false), (176, 20, WHITE, true), (224, 20, RUST, false)]),
+        (133, &[(10, 24, BLUE, false), (60, 20, WHITE, true), (110, 24, RUST, false), (162, 24, GREEN, false), (206, 24, BLUE, false)]),
+        (143, &[(40, 24, RUST, false), (180, 24, BLUE, false)]),
+    ];
+    for (z, list) in trains {
+        for &(x, len, color, tank) in list {
+            wagon(&mut w, x, G, z, len, color, tank);
+        }
+    }
+
+    // --- Parvis : marquise, kiosque, jardinières ---
+    w.fill(104, G + 12, 200, 151, G + 12, 223, METAL);
+    for x in [106, 118, 130, 142] {
+        w.fill(x, G, 200, x + 1, G + 11, 201, METAL);
+    }
+    w.fill(124, G, 176, 131, G + 5, 183, BLUE);
+    w.fill(123, G + 6, 175, 132, G + 6, 184, ROOF);
+    w.fill(110, G, 162, 117, G + 1, 163, PLASTER);
+    w.fill(138, G, 162, 145, G + 1, 163, PLASTER);
+    w.fill(110, G + 2, 162, 117, G + 2, 163, GRASS);
+    w.fill(138, G + 2, 162, 145, G + 2, 163, GRASS);
+
+    // --- Hall de la gare (départ des défenseurs), ouvert sur les deux sites ---
+    w.fill(96, G + 14, 224, 159, G + 14, 247, ROOF);
+    for x in [100, 116, 132, 148] {
+        w.fill(x, G + 14, 230, x + 5, G + 14, 241, 0);
+    }
+
+    // --- Couloirs extérieurs (accès longs depuis les voies) : portails, caisses ---
+    for (x0, x1, o0, o1) in [(16, 39, 24, 31), (216, 239, 224, 231)] {
+        w.fill(x0, G, 176, x1, G + 13, 177, CONCRETE);
+        w.fill(o0, G, 176, o1, G + 7, 177, 0);
+    }
+    w.fill(18, G, 160, 21, G + 3, 163, CRATE);
+    w.fill(34, G, 196, 37, G + 2, 199, CRATE);
+    w.fill(234, G, 162, 237, G + 2, 165, CRATE);
+    w.fill(218, G, 194, 221, G + 3, 197, CRATE);
+
+    // --- Site B : cour du dépôt, conteneurs et caisses ---
+    outline(&mut w, 48, 200, 95, 239, G - 1, YELLOW);
+    letter(&mut w, &LETTER_B, 82, G - 1, 230, MARK);
+    container(&mut w, 56, G, 222, true, RUST);
+    container(&mut w, 86, G, 202, false, BLUE);
+    w.fill(64, G, 206, 67, G + 3, 209, CRATE);
+    w.fill(88, G, 230, 91, G + 2, 233, CRATE);
+    w.fill(48, G, 234, 53, G + 7, 239, STONE);
+
+    // --- Site A : quai de marchandises surélevé d'un mètre ---
+    w.fill(160, G, 200, 207, G + 1, 239, CONCRETE);
+    w.fill(158, G, 208, 159, G, 215, CONCRETE); // marche côté parvis
+    w.fill(158, G, 224, 159, G, 239, CONCRETE); // marche côté hall
+    w.fill(208, G, 208, 209, G, 231, CONCRETE); // marche côté couloir
+    outline(&mut w, 160, 200, 207, 239, G + 1, YELLOW);
+    letter(&mut w, &LETTER_A, 194, G + 1, 226, MARK);
+    wagon(&mut w, 172, G + 2, 232, 24, RUST, false);
+    w.fill(168, G + 2, 204, 171, G + 5, 207, CRATE);
+    w.fill(198, G + 2, 210, 201, G + 4, 213, CRATE);
+    w.fill(164, G + 2, 220, 169, G + 3, 221, PLASTER);
+
+    // --- Rues du sud : voitures garées ---
+    car(&mut w, 40, 70, true, BLUE);
+    car(&mut w, 98, 66, true, BRICK);
+    car(&mut w, 150, 72, true, GREEN);
+    car(&mut w, 196, 66, true, YELLOW);
+    car(&mut w, 34, 52, false, WHITE);
+    car(&mut w, 218, 50, false, BLUE);
+    car(&mut w, 60, 30, true, GREEN);
+    car(&mut w, 186, 36, true, BRICK);
+
+    // --- Zones d'achat ---
+    outline(&mut w, 8, 8, 247, 47, G - 1, WHITE);
+    outline(&mut w, 112, 216, 143, 247, G - 1, WHITE);
+
+    let info = MapInfo {
+        id: 3,
+        name: MAPS[3].name,
+        t_spawns,
+        ct_spawns,
+        sites: [zone(160, 200, 207, 239, 1.8, 4.6), zone(48, 200, 95, 239, 1.8, 4.6)],
+        buy_zones: [zone(8, 8, 247, 47, 1.5, 6.0), zone(112, 216, 143, 247, 1.5, 6.0)],
     };
     (w, info)
 }

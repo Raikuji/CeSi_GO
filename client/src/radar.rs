@@ -1,5 +1,6 @@
 //! Minimap : plan de la carte vu du dessus, avec les joueurs, la bombe, les
-//! sites et les fumées. Le nord de la carte (côté Défenseurs) est en haut.
+//! sites et les fumées. Elle montre les alentours du joueur (`VIEW` mètres de
+//! côté, centrés sur lui), le nord de la carte (côté Défenseurs) en haut.
 //!
 //! Vue du dessus, le monde est droitier : pour ne pas inverser la gauche et la
 //! droite par rapport à la vue du joueur, les x croissent vers la gauche quand
@@ -12,6 +13,9 @@ use cesi_common::map::MapInfo;
 use cesi_common::protocol::{BombState, Team};
 use cesi_common::voxel::{block_color, World, VS};
 use macroquad::prelude::*;
+
+/// Côté de la zone montrée par la minimap, en mètres.
+pub const VIEW: f32 = 68.0;
 
 /// Hauteur franchissable d'une case à l'autre (en voxels), saut compris.
 const CLIMB: i32 = 2;
@@ -185,36 +189,72 @@ impl Game {
         if cache.as_ref().map_or(true, |b| b.map != self.info.id) {
             let p = bake(&self.world, &self.info);
             let tex = Texture2D::from_rgba8(p.n as u16, p.n as u16, &p.rgba);
+            // Lissé : à cette échelle un voxel fait moins de 2 pixels en 720p.
             tex.set_filter(FilterMode::Linear);
             *cache = Some(Baked { map: self.info.id, tex, x0: p.x0, z0: p.z0, n: p.n });
         }
         let b = cache.as_ref().unwrap();
         let k = screen_height() / 720.0;
         let n = b.n as f32;
-        let to = |p: Vec3| {
-            let u = ((b.x0 + b.n) as f32 - p.x / VS) / n;
-            let v = ((b.z0 + b.n) as f32 - p.z / VS) / n;
-            vec2(x + s * u.clamp(0.02, 0.98), y + s * v.clamp(0.02, 0.98))
+
+        // Centre de la vue : soi-même, le joueur suivi une fois éliminé, sinon le milieu de la carte.
+        let me = self.me();
+        let centre = if me.is_some_and(|m| m.alive) {
+            self.body.pos
+        } else if let Some(v) = self.spectate.and_then(|id| self.views.iter().find(|v| v.id == id && v.alive)) {
+            v.pos
+        } else {
+            vec3((b.x0 as f32 + n / 2.0) * VS, 0.0, (b.z0 as f32 + n / 2.0) * VS)
         };
+        // Coordonnées dans l'image du plan (en voxels), puis à l'écran.
+        let plan = |p: Vec3| vec2((b.x0 + b.n) as f32 - p.x / VS, (b.z0 + b.n) as f32 - p.z / VS);
+        let span = VIEW / VS;
+        let origin = plan(centre) - Vec2::splat(span / 2.0);
+        let per_px = s / span;
+        let to = |p: Vec3| vec2(x, y) + (plan(p) - origin) * per_px;
+        let box_ = Rect::new(x, y, s, s);
+        let inside = |c: Vec2| box_.contains(c);
         // Direction à l'écran d'un regard de lacet `yaw`.
         let screen_dir = |yaw: f32| vec2(-yaw.sin(), -yaw.cos());
-        let per_m = s / (n * VS);
+        let per_m = s / VIEW;
 
-        draw_rectangle(x, y, s, s, Color::new(0.03, 0.035, 0.05, 0.6));
-        draw_texture_ex(&b.tex, x, y, WHITE, DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() });
+        draw_rectangle(x, y, s, s, Color::new(0.03, 0.035, 0.05, 0.85));
+        // Partie du plan qui tombe dans la vue (rien au-delà des bords de la carte).
+        let (u0, v0) = (origin.x.max(0.0), origin.y.max(0.0));
+        let (u1, v1) = ((origin.x + span).min(n), (origin.y + span).min(n));
+        if u1 > u0 && v1 > v0 {
+            draw_texture_ex(
+                &b.tex,
+                x + (u0 - origin.x) * per_px,
+                y + (v0 - origin.y) * per_px,
+                WHITE,
+                DrawTextureParams {
+                    dest_size: Some(vec2((u1 - u0) * per_px, (v1 - v0) * per_px)),
+                    source: Some(Rect::new(u0, v0, u1 - u0, v1 - v0)),
+                    ..Default::default()
+                },
+            );
+        }
 
-        // Sites de pose.
+        // Sites de pose, découpés au bord de la vue.
         for (i, (lo, hi)) in self.info.sites.iter().enumerate() {
             let (a, c) = (to(*lo), to(*hi));
             let r = Rect::new(a.x.min(c.x), a.y.min(c.y), (a.x - c.x).abs(), (a.y - c.y).abs());
-            draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.95, 0.55, 0.15, 0.2));
-            let label = if i == 0 { "A" } else { "B" };
-            ui.shadow_px_c(label, r.x + r.w / 2.0, r.y + r.h / 2.0 + 7.0 * k, 20.0 * k, Color::new(1.0, 0.82, 0.4, 0.95));
+            if let Some(r) = r.intersect(box_) {
+                draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.95, 0.55, 0.15, 0.2));
+                if r.w > 14.0 * k && r.h > 18.0 * k {
+                    let label = if i == 0 { "A" } else { "B" };
+                    ui.shadow_px_c(label, r.x + r.w / 2.0, r.y + r.h / 2.0 + 7.0 * k, 20.0 * k, Color::new(1.0, 0.82, 0.4, 0.95));
+                }
+            }
         }
 
         // Fumées et flammes.
         for a in &snap.areas {
             let c = to(a.pos);
+            if !inside(c) {
+                continue;
+            }
             match a.kind {
                 SMOKE => draw_circle(c.x, c.y, SMOKE_RADIUS * per_m, Color::new(0.78, 0.78, 0.8, 0.8)),
                 FIRE => draw_circle(c.x, c.y, FIRE_RADIUS * per_m, Color::new(1.0, 0.42, 0.1, 0.55)),
@@ -222,18 +262,18 @@ impl Game {
             }
         }
 
-        let me = self.me();
         let my_team = me.map_or(Team::T, |m| m.team);
         let blink = (self.now * 4.0) as i64 % 2 == 0;
 
         // Bombe au sol ou posée.
         match snap.bomb {
-            BombState::Dropped(p) if my_team == Team::T => {
+            BombState::Dropped(p) if my_team == Team::T && inside(to(p)) => {
                 let c = to(p);
                 draw_rectangle(c.x - 4.0 * k, c.y - 3.0 * k, 8.0 * k, 6.0 * k, Color::new(1.0, 0.5, 0.2, 1.0));
             }
             BombState::Planted { pos, .. } => {
-                let c = to(pos);
+                // Toujours signalée : au bord de la vue si elle est plus loin.
+                let c = to(pos).clamp(vec2(x + 6.0 * k, y + 5.0 * k), vec2(x + s - 6.0 * k, y + s - 5.0 * k));
                 let col = if blink { Color::new(1.0, 0.2, 0.15, 1.0) } else { Color::new(0.5, 0.05, 0.05, 1.0) };
                 draw_rectangle(c.x - 5.0 * k, c.y - 4.0 * k, 10.0 * k, 8.0 * k, col);
             }
@@ -247,6 +287,9 @@ impl Game {
         };
         for v in self.views.iter().filter(|v| v.alive && Some(v.id) != self.my_id) {
             let c = to(v.pos);
+            if !inside(c) {
+                continue;
+            }
             if v.team == my_team {
                 let col = if v.team == Team::T { T_COLOR } else { CT_COLOR };
                 if carrier == Some(v.id) {

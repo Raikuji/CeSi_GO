@@ -41,6 +41,7 @@ allège la carte graphique.
 | Comptoir | Ville du désert : trois couloirs, les deux sites au nord |
 | Entrepôt | Zone portuaire : halle couverte pour le site B, quai à conteneurs pour le site A |
 | Citadelle | Forteresse enneigée : les deux sites dans la cour, sous le rempart des défenseurs |
+| Gare | Grande gare de triage, quatre fois plus vaste (128 m de côté) : rues au sud, voies et wagons à traverser, les deux sites de part et d'autre de la gare au nord |
 
 En partie locale, la carte se choisit dans l'écran Jouer (elle tourne en
 arrière-plan du menu). Sur un serveur dédié, c'est le serveur qui la fixe : clé
@@ -49,8 +50,9 @@ joueurs connectés changent de carte sans se reconnecter.
 
 ## Minimap
 
-En haut à droite, le plan de la carte vu du dessus, nord (côté Défenseurs) en
-haut. Votre flèche indique où vous regardez ; vos coéquipiers sont des points
+En haut à droite, les alentours du joueur vus du dessus (68 m de côté, centrés
+sur vous, ou sur le joueur suivi une fois éliminé), nord (côté Défenseurs) en
+haut ; une bombe posée hors de cette zone reste signalée au bord. Votre flèche indique où vous regardez ; vos coéquipiers sont des points
 de leur couleur, les ennemis apparaissent en rouge tant que l'un de vous les
 voit (pas à travers les murs ni les fumées). On y voit aussi les sites A et B,
 les fumées, les flammes et la bombe (posée pour tous, au sol ou portée pour les

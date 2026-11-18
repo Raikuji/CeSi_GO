@@ -78,7 +78,8 @@ pub fn main_menu(ui: &mut Ui, st: &mut MenuState, s: &mut Settings) -> MenuActio
             // Sélecteur de carte : la carte choisie tourne en arrière-plan.
             ui.text("Carte", 114.0, 268.0, 18.0, DIM);
             for (i, m) in MAPS.iter().enumerate() {
-                if ui.tab(Rect::new(114.0 + i as f32 * 160.0, 280.0, 152.0, 40.0), m.name, s.map as usize == i) {
+                // Quatre onglets sur la largeur du panneau.
+                if ui.tab(Rect::new(114.0 + i as f32 * 120.0, 280.0, 112.0, 40.0), m.name, s.map as usize == i) {
                     s.map = i as u8;
                 }
             }
