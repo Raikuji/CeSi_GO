@@ -9,8 +9,9 @@ pub const HEIGHT_STAND: f32 = 1.8;
 pub const HEIGHT_CROUCH: f32 = 1.3;
 pub const EYE_STAND: f32 = 1.62;
 pub const EYE_CROUCH: f32 = 1.12;
-/// Vitesse de course couteau en main (m/s).
-pub const BASE_SPEED: f32 = 5.6;
+/// Vitesse de course couteau en main (m/s) ; les armes plus lourdes ralentissent
+/// (voir `WeaponDef::speed`).
+pub const BASE_SPEED: f32 = 5.9;
 
 const GRAVITY: f32 = 15.5;
 const JUMP_SPEED: f32 = 5.95;

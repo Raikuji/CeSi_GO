@@ -51,7 +51,10 @@ pub struct WeaponDef {
     pub recoil_v: f32,
     /// Recul horizontal par tir (degrés).
     pub recoil_h: f32,
-    /// Vitesse de déplacement (fraction de la vitesse de base).
+    /// Poids de l'arme (kg).
+    pub weight: f32,
+    /// Vitesse de déplacement, en fraction de la vitesse couteau en main :
+    /// elle baisse avec le poids (`SLOWDOWN_PER_KG`).
     pub speed: f32,
     pub scope: bool,
 }
@@ -68,6 +71,11 @@ pub const KNIFE_HEAVY_COOLDOWN: f32 = 1.3;
 pub const PICKUP_RANGE: f32 = 2.6;
 pub const KNIFE_HEAVY_MULT: f32 = 2.0;
 
+/// Perte de vitesse par kilogramme au-delà du couteau (fraction de la vitesse de base).
+pub const SLOWDOWN_PER_KG: f32 = 0.045;
+/// Poids du couteau, l'arme la plus légère : pleine vitesse.
+const WEAPONS_LIGHTEST: f32 = 0.3;
+
 pub const PRICE_KEVLAR: u32 = 650;
 pub const PRICE_KEVLAR_HELMET: u32 = 1000;
 pub const PRICE_HELMET_ONLY: u32 = 350;
@@ -76,7 +84,7 @@ pub const PRICE_KIT: u32 = 400;
 macro_rules! w {
     ($id:expr, $name:expr, $class:ident, $price:expr, $reward:expr, $dmg:expr, $pen:expr, $rm:expr,
      $rpm:expr, $auto:expr, $mag:expr, $res:expr, $rel:expr, $sp:expr, $spm:expr, $rv:expr, $rh:expr,
-     $speed:expr, $scope:expr) => {
+     $weight:expr, $scope:expr) => {
         WeaponDef {
             id: $id,
             name: $name,
@@ -96,7 +104,8 @@ macro_rules! w {
             spread_move: $spm,
             recoil_v: $rv,
             recoil_h: $rh,
-            speed: $speed,
+            weight: $weight,
+            speed: 1.0 - SLOWDOWN_PER_KG * ($weight - WEAPONS_LIGHTEST),
             scope: $scope,
         }
     };
@@ -104,23 +113,45 @@ macro_rules! w {
 
 #[rustfmt::skip]
 pub const WEAPONS: [WeaponDef; 13] = [
-    //  id  nom           classe  prix  prime dégâts pén.  portée cad.   auto   charg rés. rech. disp. mouv. recV recH  vit.  lunette
-    w!(0,  "Couteau",     Knife,  0,    1500, 45.0,  0.85, 1.0,   120.0, true,  0,    0,   0.0,  0.0,  0.0,  0.0,  0.0, 1.0,  false),
-    w!(1,  "P-9",         Pistol, 200,  300,  26.0,  0.50, 0.85,  400.0, false, 15,   60,  2.2,  0.35, 2.0,  1.6,  0.5, 0.96, false),
-    w!(2,  "Vipère",      Pistol, 300,  300,  35.0,  0.64, 0.85,  400.0, false, 13,   39,  2.2,  0.40, 2.2,  2.0,  0.6, 0.96, false),
-    w!(3,  "Rhino .50",   Pistol, 700,  300,  55.0,  0.93, 0.82,  267.0, false, 7,    35,  2.2,  0.30, 3.5,  5.5,  1.5, 0.92, false),
-    w!(4,  "Frelon",      Smg,    1050, 600,  27.0,  0.57, 0.75,  800.0, true,  30,   100, 2.6,  0.90, 1.2,  0.90, 0.50, 0.96, false),
-    w!(5,  "Vecteur",     Smg,    1250, 600,  25.0,  0.60, 0.80,  857.0, true,  30,   120, 2.1,  0.70, 1.0,  0.80, 0.45, 0.96, false),
-    w!(6,  "Essaim",      Smg,    2350, 300,  26.0,  0.69, 0.86,  857.0, true,  50,   100, 3.3,  0.80, 0.9,  0.75, 0.40, 0.92, false),
-    w!(7,  "Kodiak",      Rifle,  2700, 300,  36.0,  0.775, 0.98, 600.0, true,  30,   90,  2.4,  0.25, 4.5,  1.50, 0.70, 0.86, false),
-    w!(8,  "Faucon",      Rifle,  3000, 300,  33.0,  0.70, 0.97,  666.0, true,  30,   90,  3.1,  0.20, 4.0,  1.25, 0.55, 0.90, false),
-    w!(9,  "Mistral",     Rifle,  2000, 300,  30.0,  0.70, 0.96,  666.0, true,  25,   90,  3.2,  0.30, 4.2,  1.30, 0.65, 0.88, false),
-    w!(10, "Éclaireur",   Sniper, 1700, 300,  88.0,  0.85, 0.98,  48.0,  false, 10,   90,  3.7,  0.05, 3.0,  3.0,  0.5, 0.92, true),
-    w!(11, "Léviathan",   Sniper, 4750, 100,  115.0, 0.975, 0.99, 41.0,  false, 5,    30,  3.7,  0.02, 5.0,  4.5,  0.8, 0.80, true),
-    w!(12, "Mammouth",    Lmg,    5200, 300,  32.0,  0.80, 0.97,  750.0, true,  100,  200, 5.7,  0.50, 5.0,  1.10, 0.60, 0.78, false),
+    //  id  nom           classe  prix  prime dégâts pén.  portée cad.   auto   charg rés. rech. disp. mouv. recV recH  kg    lunette
+    w!(0,  "Couteau",     Knife,  0,    1500, 45.0,  0.85, 1.0,   120.0, true,  0,    0,   0.0,  0.0,  0.0,  0.0,  0.0, 0.3,  false),
+    w!(1,  "P-9",         Pistol, 200,  300,  26.0,  0.50, 0.85,  400.0, false, 15,   60,  2.2,  0.35, 2.0,  1.6,  0.5, 0.7,  false),
+    w!(2,  "Vipère",      Pistol, 300,  300,  35.0,  0.64, 0.85,  400.0, false, 13,   39,  2.2,  0.40, 2.2,  2.0,  0.6, 0.8,  false),
+    w!(3,  "Rhino .50",   Pistol, 700,  300,  55.0,  0.93, 0.82,  267.0, false, 7,    35,  2.2,  0.30, 3.5,  5.5,  1.5, 2.0,  false),
+    w!(4,  "Frelon",      Smg,    1050, 600,  27.0,  0.57, 0.75,  800.0, true,  30,   100, 2.6,  0.90, 1.2,  0.90, 0.50, 2.6,  false),
+    w!(5,  "Vecteur",     Smg,    1250, 600,  25.0,  0.60, 0.80,  857.0, true,  30,   120, 2.1,  0.70, 1.0,  0.80, 0.45, 2.5,  false),
+    w!(6,  "Essaim",      Smg,    2350, 300,  26.0,  0.69, 0.86,  857.0, true,  50,   100, 3.3,  0.80, 0.9,  0.75, 0.40, 3.4,  false),
+    w!(7,  "Kodiak",      Rifle,  2700, 300,  36.0,  0.775, 0.98, 600.0, true,  30,   90,  2.4,  0.25, 4.5,  1.50, 0.70, 3.9,  false),
+    w!(8,  "Faucon",      Rifle,  3000, 300,  33.0,  0.70, 0.97,  666.0, true,  30,   90,  3.1,  0.20, 4.0,  1.25, 0.55, 3.4,  false),
+    w!(9,  "Mistral",     Rifle,  2000, 300,  30.0,  0.70, 0.96,  666.0, true,  25,   90,  3.2,  0.30, 4.2,  1.30, 0.65, 3.0,  false),
+    w!(10, "Éclaireur",   Sniper, 1700, 300,  88.0,  0.85, 0.98,  48.0,  false, 10,   90,  3.7,  0.05, 3.0,  3.0,  0.5, 3.0,  true),
+    w!(11, "Léviathan",   Sniper, 4750, 100,  115.0, 0.975, 0.99, 41.0,  false, 5,    30,  3.7,  0.02, 5.0,  4.5,  0.8, 6.5,  true),
+    w!(12, "Mammouth",    Lmg,    5200, 300,  32.0,  0.80, 0.97,  750.0, true,  100,  200, 5.7,  0.50, 5.0,  1.10, 0.60, 8.0,  false),
 ];
 
 pub fn weapon(id: u8) -> &'static WeaponDef {
     // Identifiant inconnu (grenade en main, par exemple) : caractéristiques du couteau.
     WEAPONS.get(id as usize).unwrap_or(&WEAPONS[0])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Le couteau est l'arme la plus rapide ; plus une arme est lourde, plus on est lent.
+    #[test]
+    fn heavier_weapons_are_slower_and_the_knife_is_fastest() {
+        let knife = weapon(KNIFE).speed;
+        assert_eq!(knife, 1.0);
+        for a in WEAPONS.iter().skip(1) {
+            assert!(a.speed < knife, "{} plus rapide que le couteau", a.name);
+            for b in WEAPONS.iter() {
+                if a.weight > b.weight {
+                    assert!(a.speed < b.speed, "{} ({} kg) pas plus lent que {} ({} kg)", a.name, a.weight, b.name, b.weight);
+                }
+            }
+        }
+        // La plus lourde reste jouable.
+        assert!(weapon(12).speed > 0.6);
+    }
 }

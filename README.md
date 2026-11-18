@@ -34,6 +34,20 @@ l'autre). En fenêtré, la résolution est la taille de la fenêtre ; en plein
 résolution choisie puis agrandie (le HUD et les menus restent nets), ce qui
 allège la carte graphique.
 
+## Vitesse de déplacement
+
+On court le plus vite couteau en main (5,9 m/s) ; chaque arme ralentit selon son
+poids, affiché avec la vitesse au survol dans le menu d'achat :
+
+| Arme | Poids | Vitesse |
+| --- | --- | --- |
+| Couteau, grenades | 0,3 kg | 100 % |
+| Pistolets | 0,7 à 2 kg | 98 à 92 % |
+| Pistolets-mitrailleurs | 2,5 à 3,4 kg | 90 à 86 % |
+| Fusils d'assaut, Éclaireur | 3 à 3,9 kg | 88 à 84 % |
+| Léviathan | 6,5 kg | 72 % |
+| Mammouth | 8 kg | 65 % |
+
 ## Cartes
 
 | Carte | Décor |

@@ -476,13 +476,15 @@ impl Game {
                     info = Some(sell_info(d.name, back.unwrap_or(0)));
                 } else if hot {
                     info = Some(format!(
-                        "{} — dégâts {:.0} · cadence {:.0}/min · chargeur {} · pénétration du gilet {:.0} % · prime {} $",
+                        "{} — dégâts {:.0} · cadence {:.0}/min · chargeur {} · gilet {:.0} % · prime {} $ · {} kg, vitesse {:.0} %",
                         d.name,
                         d.damage,
                         d.rpm,
                         d.mag,
                         d.armor_pen * 100.0,
-                        d.kill_reward
+                        d.kill_reward,
+                        format!("{:.1}", d.weight).replace('.', ","),
+                        d.speed * 100.0
                     ));
                 }
                 y += 44.0;
