@@ -155,13 +155,22 @@ impl Game {
         for l in self.killfeed.iter().filter(|l| self.now - l.time < 7.0) {
             let mid = format!(" [{}{}] ", item_name(l.weapon), if l.headshot { " · tête" } else { "" });
             let size = 16.0 * k;
-            let (wk, wm, wv) = (ui.width_px(&l.killer, size), ui.width_px(&mid, size), ui.width_px(&l.victim, size));
+            // « Tueur + Assistant [arme] Victime »
+            let plus = l.assist.as_ref().map(|(n, _)| format!(" + {}", n)).unwrap_or_default();
+            let wk = ui.width_px(&l.killer, size) + ui.width_px(&plus, size);
+            let (wm, wv) = (ui.width_px(&mid, size), ui.width_px(&l.victim, size));
             let x = w - 16.0 * k - (wk + wm + wv);
             draw_rectangle(x - 8.0 * k, y - 17.0 * k, wk + wm + wv + 16.0 * k, 24.0 * k, Color::new(0.0, 0.0, 0.0, if l.mine { 0.7 } else { 0.4 }));
             if l.mine {
                 draw_rectangle_lines(x - 8.0 * k, y - 17.0 * k, wk + wm + wv + 16.0 * k, 24.0 * k, 2.0, Color::new(0.9, 0.2, 0.2, 0.9));
             }
             ui.text_px(&l.killer, x, y, size, l.kteam.map_or(TEXT, team_color));
+            if let Some((_, t)) = &l.assist {
+                ui.text_px(" +", x + ui.width_px(&l.killer, size), y, size, TEXT);
+                // Le nom finit là où commence « [arme] », comme dans le calcul de largeur.
+                let name = &plus[3..];
+                ui.text_px(name, x + wk - ui.width_px(name, size), y, size, team_color(*t));
+            }
             ui.text_px(&mid, x + wk, y, size, TEXT);
             ui.text_px(&l.victim, x + wk + wm, y, size, team_color(l.vteam));
             y += 28.0 * k;
@@ -352,12 +361,13 @@ impl Game {
             let score = if team == Team::T { snap.score_t } else { snap.score_ct };
             ui.rect(Rect::new(panel.x + 20.0, y - 22.0, panel.w - 40.0, 30.0), Color::new(col.r, col.g, col.b, 0.18));
             ui.text(&format!("{} — {}", team.label(), score), panel.x + 32.0, y, 20.0, col);
-            ui.text_r("Élim.", 800.0, y, 14.0, DIM);
-            ui.text_r("Morts", 880.0, y, 14.0, DIM);
+            ui.text_r("Élim.", 760.0, y, 14.0, DIM);
+            ui.text_r("Assist.", 840.0, y, 14.0, DIM);
+            ui.text_r("Morts", 910.0, y, 14.0, DIM);
             ui.text_r("Argent", 1000.0, y, 14.0, DIM);
             y += 30.0;
             let mut list: Vec<&PlayerSnap> = snap.players.iter().filter(|p| p.team == team).collect();
-            list.sort_by(|a, b| b.kills.cmp(&a.kills).then(a.deaths.cmp(&b.deaths)));
+            list.sort_by(|a, b| b.kills.cmp(&a.kills).then(b.assists.cmp(&a.assists)).then(a.deaths.cmp(&b.deaths)));
             for p in list {
                 let c = if !p.alive {
                     DIM
@@ -370,8 +380,9 @@ impl Game {
                 if !p.alive {
                     ui.text("éliminé", panel.x + 300.0, y, 14.0, DIM);
                 }
-                ui.text_r(&p.kills.to_string(), 800.0, y, 18.0, c);
-                ui.text_r(&p.deaths.to_string(), 880.0, y, 18.0, c);
+                ui.text_r(&p.kills.to_string(), 760.0, y, 18.0, c);
+                ui.text_r(&p.assists.to_string(), 840.0, y, 18.0, c);
+                ui.text_r(&p.deaths.to_string(), 910.0, y, 18.0, c);
                 if Some(team) == my_team {
                     ui.text_r(&format!("{} $", p.money), 1000.0, y, 18.0, c);
                 }

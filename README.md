@@ -68,6 +68,14 @@ dessus (celui qui vient de la lâcher doit d'abord s'en éloigner). Les
 attaquants sont prévenus quand elle tombe ou change de main, et la voient sur
 la minimap.
 
+## Assistances
+
+Un joueur qui a infligé au moins 40 dégâts à un adversaire achevé par
+quelqu'un d'autre compte une assistance (colonne « Assist. » du tableau des
+scores). Le fil des éliminations affiche le principal assistant :
+« Tueur + Assistant [arme] Victime ». Les dégâts infligés à un coéquipier ne
+comptent pas.
+
 ## Revente
 
 Tant que les achats sont ouverts et que vous êtes dans la zone d'achat, ce que

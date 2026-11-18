@@ -338,7 +338,9 @@ async fn main() {
                     if game.is_none() && start.is_none() =>
                 {
                     start = Some(true);
-                    shot_at = Some(get_time() + if mode == "nade" { 11.5 } else { 9.0 });
+                    // --after <s> : attend plus longtemps avant la capture (laisser les bots jouer).
+                    let after = args.iter().position(|a| a == "--after").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f64>().ok());
+                    shot_at = Some(get_time() + after.unwrap_or(if mode == "nade" { 11.5 } else { 9.0 }));
                 }
                 _ => {}
             }

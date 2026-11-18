@@ -102,7 +102,10 @@ pub struct Player {
     pub kit: bool,
     pub money: u32,
     pub kills: u16,
+    pub assists: u16,
     pub deaths: u16,
+    /// Dégâts reçus des adversaires depuis l'apparition, par joueur (pour les assistances).
+    pub(crate) damage_from: Vec<(PlayerId, i32)>,
     pub pos: Vec3,
     pub yaw: f32,
     pub pitch: f32,
@@ -144,7 +147,9 @@ impl Player {
             kit: false,
             money,
             kills: 0,
+            assists: 0,
             deaths: 0,
+            damage_from: Vec::new(),
             pos: Vec3::ZERO,
             yaw: 0.0,
             pitch: 0.0,
@@ -649,6 +654,7 @@ impl Server {
                     kit: p.kit,
                     money: p.money,
                     kills: p.kills,
+                    assists: p.assists,
                     deaths: p.deaths,
                     action: p.action,
                     progress: p.progress,
@@ -723,6 +729,7 @@ impl Server {
         for p in &mut self.players {
             p.money = money;
             p.kills = 0;
+            p.assists = 0;
             p.deaths = 0;
             p.fresh = true;
             p.alive = false;
@@ -780,6 +787,7 @@ impl Server {
         let p = &mut self.players[i];
         p.alive = true;
         p.health = 100;
+        p.damage_from.clear();
         p.pos = pos;
         p.yaw = yaw;
         p.pitch = 0.0;
@@ -1327,7 +1335,16 @@ impl Server {
         let dealt = d.min(v.health.max(0));
         v.health -= d;
         let killed = v.health <= 0;
-        let (vid, vbot) = (v.id, v.is_bot);
+        let (vid, vbot, vteam) = (v.id, v.is_bot, v.team);
+        // Dégâts d'un adversaire : comptés pour une éventuelle assistance.
+        if let Some(a) = attacker.filter(|a| *a != victim && self.players[*a].team != vteam) {
+            let aid = self.players[a].id;
+            let v = &mut self.players[victim];
+            match v.damage_from.iter_mut().find(|(id, _)| *id == aid) {
+                Some((_, total)) => *total += dealt,
+                None => v.damage_from.push((aid, dealt)),
+            }
+        }
         if !vbot {
             self.send_to(vid, ServerMsg::Hurt { from, damage: d.min(999) as u16 });
         }
@@ -1383,7 +1400,18 @@ impl Server {
         } else {
             self.say(&format!("{} est mort dans l'explosion", vname));
         }
-        self.broadcast(ServerMsg::Kill { killer, victim: vid, weapon: wid, headshot });
+        // Assistances : tout adversaire autre que le tueur qui a infligé assez de dégâts.
+        let helpers: Vec<(PlayerId, i32)> = std::mem::take(&mut self.players[victim].damage_from)
+            .into_iter()
+            .filter(|(id, d)| *d >= ASSIST_DAMAGE && Some(*id) != killer)
+            .collect();
+        for (id, _) in &helpers {
+            if let Some(j) = self.idx(*id) {
+                self.players[j].assists += 1;
+            }
+        }
+        let assist = helpers.iter().max_by_key(|(_, d)| *d).map(|(id, _)| *id);
+        self.broadcast(ServerMsg::Kill { killer, assist, victim: vid, weapon: wid, headshot });
     }
 
     // ------------------------------------------------------------------ administration

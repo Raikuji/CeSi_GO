@@ -271,6 +271,31 @@ mod tests {
     }
 
     #[test]
+    fn assist_needs_40_damage_on_an_enemy_finished_by_someone_else() {
+        let mut s = server();
+        let foe_spawn = s.info.ct_spawns[0].0;
+        for (id, team, pos) in [(2, Team::T, s.players[0].pos), (3, Team::T, s.players[0].pos), (4, Team::CT, foe_spawn)] {
+            let mut p = Player::new(id, format!("J{}", id), team, 800, None);
+            p.alive = true;
+            p.health = 100;
+            p.pos = pos;
+            s.players.push(p);
+        }
+        s.players[0].health = 100;
+        // Le joueur 1 inflige 45, le joueur 2 en inflige 30, le joueur 3 achève l'adversaire.
+        s.damage(3, Some(0), 45.0, 1.0, 1, 2, foe_spawn);
+        s.damage(3, Some(1), 30.0, 1.0, 1, 2, foe_spawn);
+        s.damage(3, Some(2), 60.0, 1.0, 1, 2, foe_spawn);
+        assert!(!s.players[3].alive);
+        assert_eq!((s.players[0].assists, s.players[1].assists, s.players[2].assists), (1, 0, 0));
+        assert_eq!(s.players[2].kills, 1);
+        // Les dégâts d'un coéquipier ne comptent pas.
+        (s.players[3].alive, s.players[3].health) = (true, 100);
+        s.damage(0, Some(1), 50.0, 1.0, 1, 2, foe_spawn);
+        assert!(s.players[0].damage_from.is_empty());
+    }
+
+    #[test]
     fn exchange_leaves_the_old_weapon_with_its_ammo() {
         let mut s = server();
         s.players[0].primary = 7;

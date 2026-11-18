@@ -67,6 +67,8 @@ pub struct Corpse {
 pub struct KillLine {
     pub killer: String,
     pub kteam: Option<Team>,
+    /// Joueur qui a aidé à l'élimination (nom, équipe).
+    pub assist: Option<(String, Team)>,
     pub victim: String,
     pub vteam: Team,
     pub weapon: u8,
@@ -558,7 +560,8 @@ impl Game {
                 self.recoil.x += (damage as f32 * 0.03).min(1.5);
                 audio.play("hurt", 0.8);
             }
-            ServerMsg::Kill { killer, victim, weapon: wid, headshot } => {
+            ServerMsg::Kill { killer, assist, victim, weapon: wid, headshot } => {
+                let assist = assist.map(|a| self.name_team(a));
                 let (vname, vteam) = self.name_team(victim);
                 let (kname, kteam) = match killer {
                     Some(k) => {
@@ -568,7 +571,7 @@ impl Game {
                     None => (String::new(), None),
                 };
                 let mine = self.my_id.is_some() && (killer == self.my_id || Some(victim) == self.my_id);
-                self.killfeed.push(KillLine { killer: kname, kteam, victim: vname, vteam, weapon: wid, headshot, time: self.now, mine });
+                self.killfeed.push(KillLine { killer: kname, kteam, assist, victim: vname, vteam, weapon: wid, headshot, time: self.now, mine });
                 if self.killfeed.len() > 6 {
                     self.killfeed.remove(0);
                 }

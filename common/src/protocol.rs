@@ -3,9 +3,11 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL: u16 = 9;
+pub const PROTOCOL: u16 = 10;
 pub const DEFAULT_PORT: u16 = 27500;
 pub const TICK_RATE: u32 = 60;
+/// Dégâts à infliger à un adversaire, sans l'achever, pour compter une assistance.
+pub const ASSIST_DAMAGE: i32 = 40;
 
 pub type PlayerId = u8;
 
@@ -137,7 +139,8 @@ pub enum ServerMsg {
     Hit { victim: PlayerId, damage: u16, headshot: bool, killed: bool, pos: Vec3 },
     /// Dégâts reçus.
     Hurt { from: Vec3, damage: u16 },
-    Kill { killer: Option<PlayerId>, victim: PlayerId, weapon: u8, headshot: bool },
+    /// `assist` : celui qui, après le tueur, a infligé le plus de dégâts (au moins `ASSIST_DAMAGE`).
+    Kill { killer: Option<PlayerId>, assist: Option<PlayerId>, victim: PlayerId, weapon: u8, headshot: bool },
     RoundStart { round: u16 },
     RoundEnd { winner: Team, reason: EndReason },
     BombPlanted { site: u8 },
@@ -179,6 +182,7 @@ pub struct PlayerSnap {
     pub kit: bool,
     pub money: u32,
     pub kills: u16,
+    pub assists: u16,
     pub deaths: u16,
     /// 0 rien, 1 pose la bombe, 2 désamorce.
     pub action: u8,
