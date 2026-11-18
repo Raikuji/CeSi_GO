@@ -78,6 +78,13 @@ dessus (celui qui vient de la lâcher doit d'abord s'en éloigner). Les
 attaquants sont prévenus quand elle tombe ou change de main, et la voient sur
 la minimap.
 
+## Tableau des scores
+
+`Tab` affiche, pour chaque joueur, éliminations, assistances, morts, argent
+(celui de votre équipe) et ping : la latence aller-retour vers le serveur, en
+millisecondes (vert sous 60 ms, jaune sous 120 ms, rouge au-delà ; « BOT » pour
+les bots). Elle compte aussi le temps de traitement du serveur, jusqu'à 16 ms.
+
 ## Assistances
 
 Un joueur qui a infligé au moins 40 dégâts à un adversaire achevé par

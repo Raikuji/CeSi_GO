@@ -364,10 +364,11 @@ impl Game {
             let score = if team == Team::T { snap.score_t } else { snap.score_ct };
             ui.rect(Rect::new(panel.x + 20.0, y - 22.0, panel.w - 40.0, 30.0), Color::new(col.r, col.g, col.b, 0.18));
             ui.text(&format!("{} — {}", team.label(), score), panel.x + 32.0, y, 20.0, col);
-            ui.text_r("Élim.", 760.0, y, 14.0, DIM);
-            ui.text_r("Assist.", 840.0, y, 14.0, DIM);
-            ui.text_r("Morts", 910.0, y, 14.0, DIM);
-            ui.text_r("Argent", 1000.0, y, 14.0, DIM);
+            ui.text_r("Élim.", 700.0, y, 14.0, DIM);
+            ui.text_r("Assist.", 780.0, y, 14.0, DIM);
+            ui.text_r("Morts", 850.0, y, 14.0, DIM);
+            ui.text_r("Argent", 945.0, y, 14.0, DIM);
+            ui.text_r("Ping", 1020.0, y, 14.0, DIM);
             y += 30.0;
             let mut list: Vec<&PlayerSnap> = snap.players.iter().filter(|p| p.team == team).collect();
             list.sort_by(|a, b| b.kills.cmp(&a.kills).then(b.assists.cmp(&a.assists)).then(a.deaths.cmp(&b.deaths)));
@@ -383,11 +384,22 @@ impl Game {
                 if !p.alive {
                     ui.text("éliminé", panel.x + 300.0, y, 14.0, DIM);
                 }
-                ui.text_r(&p.kills.to_string(), 760.0, y, 18.0, c);
-                ui.text_r(&p.assists.to_string(), 840.0, y, 18.0, c);
-                ui.text_r(&p.deaths.to_string(), 910.0, y, 18.0, c);
+                ui.text_r(&p.kills.to_string(), 700.0, y, 18.0, c);
+                ui.text_r(&p.assists.to_string(), 780.0, y, 18.0, c);
+                ui.text_r(&p.deaths.to_string(), 850.0, y, 18.0, c);
                 if Some(team) == my_team {
-                    ui.text_r(&format!("{} $", p.money), 1000.0, y, 18.0, c);
+                    ui.text_r(&format!("{} $", p.money), 945.0, y, 18.0, c);
+                }
+                // Latence vers le serveur : verte, jaune puis rouge.
+                if p.bot {
+                    ui.text_r("BOT", 1020.0, y, 14.0, DIM);
+                } else {
+                    let col = match p.ping {
+                        0..=59 => Color::new(0.55, 0.9, 0.45, 1.0),
+                        60..=119 => Color::new(1.0, 0.85, 0.3, 1.0),
+                        _ => Color::new(1.0, 0.4, 0.3, 1.0),
+                    };
+                    ui.text_r(&format!("{} ms", p.ping), 1020.0, y, 16.0, col);
                 }
                 y += 26.0;
             }

@@ -315,6 +315,37 @@ mod tests {
     }
 
     #[test]
+    fn latency_is_measured_from_the_echoed_snapshot_time() {
+        use cesi_common::protocol::ClientState;
+        let mut s = server();
+        let start = s.players[0].pos;
+        let st = |n: u32, echo: f64, delay: f32, idle: bool| ClientState {
+            n,
+            // Un état « mort » annonce une autre position : elle doit être ignorée.
+            pos: if idle { Vec3::ZERO } else { start },
+            yaw: 0.0,
+            pitch: 0.0,
+            crouch: false,
+            weapon: 0,
+            using: false,
+            reloading: false,
+            air: false,
+            echo,
+            echo_delay: delay,
+            idle,
+        };
+        s.time = 10.0;
+        // Photo envoyée à 9,90 s, gardée 20 ms par le client : 80 ms d'aller-retour.
+        s.handle_state(1, st(1, 9.90, 0.02, false));
+        assert!((s.players[0].rtt - 0.08).abs() < 0.002, "{}", s.players[0].rtt);
+        // Un joueur mort continue d'être mesuré, sans que sa position change.
+        s.time = 11.0;
+        s.handle_state(1, st(2, 10.95, 0.0, true));
+        assert!(s.players[0].rtt > 0.06 && s.players[0].rtt < 0.08);
+        assert_eq!(s.players[0].pos, start);
+    }
+
+    #[test]
     fn exchange_leaves_the_old_weapon_with_its_ammo() {
         let mut s = server();
         s.players[0].primary = 7;

@@ -174,6 +174,8 @@ pub struct Game {
     pub blind_t: f32,
     pub nade_views: Vec<NadeSnap>,
     pub fire_snd: f64,
+    /// Dernière photo reçue : (heure serveur, heure locale de réception).
+    pub last_snap: (f64, f64),
     /// Points signalés par l'équipe : (auteur, position, heure), un par joueur.
     pub pings: Vec<(PlayerId, Vec3, f64)>,
     /// Diagnostic : signale le point visé quelques secondes après le début.
@@ -317,6 +319,7 @@ impl Game {
             blind_t: 0.0,
             nade_views: Vec::new(),
             fire_snd: 0.0,
+            last_snap: (0.0, 0.0),
             pings: Vec::new(),
             debug_ping: false,
             action_snd: HashMap::new(),
@@ -692,6 +695,7 @@ impl Game {
         if self.snaps.back().is_some_and(|l| s.time <= l.time) {
             return;
         }
+        self.last_snap = (s.time, get_time());
         let sample = s.time - self.now;
         self.time_offset = Some(match self.time_offset {
             Some(o) if (sample - o).abs() < 0.25 => o + (sample - o) * 0.05,
@@ -1210,6 +1214,9 @@ impl Game {
                     using: self.using,
                     reloading: self.reload_t > 0.0,
                     air: !self.body.on_ground,
+                    echo: 0.0,
+                    echo_delay: 0.0,
+                    idle: false,
                 }),
             );
         } else {
@@ -1319,7 +1326,24 @@ impl Game {
         self.send_acc = (self.send_acc - 1.0 / 60.0).min(1.0 / 60.0);
         self.send_n += 1;
         let n = self.send_n;
-        self.net.send(state.map(|s| ClientState { n, ..s }));
+        // Toujours un état, même mort, pour que le serveur mesure la latence.
+        let (echo, at) = self.last_snap;
+        let echo_delay = if echo > 0.0 { (get_time() - at) as f32 } else { 0.0 };
+        let st = state.map(|s| ClientState { n, echo, echo_delay, ..s }).unwrap_or(ClientState {
+            n,
+            pos: self.body.pos,
+            yaw: self.yaw,
+            pitch: self.pitch,
+            crouch: false,
+            weapon: 0,
+            using: false,
+            reloading: false,
+            air: false,
+            echo,
+            echo_delay,
+            idle: true,
+        });
+        self.net.send(Some(st));
     }
 
     pub fn buy(&mut self, item: BuyItem, audio: &Audio) {

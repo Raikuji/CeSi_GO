@@ -130,6 +130,8 @@ pub struct Player {
     last_state: u32,
     /// Heure du dernier signalement (cadence limitée).
     pub(crate) last_ping: f64,
+    /// Latence aller-retour lissée, en secondes.
+    pub(crate) rtt: f32,
     /// Achats du round, revendables tant que les achats sont ouverts.
     pub(crate) bought: Vec<crate::shop::Purchase>,
     /// Dernière liste de reventes envoyée au joueur.
@@ -176,6 +178,7 @@ impl Player {
             refunds_sent: Vec::new(),
             last_state: 0,
             last_ping: -10.0,
+            rtt: 0.0,
         }
     }
 
@@ -550,11 +553,21 @@ impl Server {
         }
     }
 
-    fn handle_state(&mut self, pid: PlayerId, st: ClientState) {
+    pub(crate) fn handle_state(&mut self, pid: PlayerId, st: ClientState) {
         let frozen = self.phase == Phase::Freeze;
         let Some(i) = self.idx(pid) else { return };
+        let now = self.time;
         let p = &mut self.players[i];
         if st.n <= p.last_state && p.last_state - st.n < 100_000 {
+            return;
+        }
+        // Latence : âge de la photo renvoyée, moins le temps passé chez le client.
+        let sample = (now - st.echo) as f32 - st.echo_delay;
+        if st.echo > 0.0 && sample.is_finite() && (0.0..3.0).contains(&sample) {
+            p.rtt = if p.rtt == 0.0 { sample.max(0.001) } else { p.rtt + (sample - p.rtt) * 0.2 };
+        }
+        if st.idle {
+            p.last_state = st.n;
             return;
         }
         if !(st.pos.is_finite() && st.yaw.is_finite() && st.pitch.is_finite()) {
@@ -681,6 +694,7 @@ impl Server {
                     money: p.money,
                     kills: p.kills,
                     assists: p.assists,
+                    ping: (p.rtt * 1000.0).round().min(9999.0) as u16,
                     deaths: p.deaths,
                     action: p.action,
                     progress: p.progress,

@@ -3,7 +3,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL: u16 = 11;
+pub const PROTOCOL: u16 = 12;
 pub const DEFAULT_PORT: u16 = 27500;
 pub const TICK_RATE: u32 = 60;
 /// Dégâts à infliger à un adversaire, sans l'achever, pour compter une assistance.
@@ -126,6 +126,12 @@ pub struct ClientState {
     /// Pour l'animation vue par les autres joueurs.
     pub reloading: bool,
     pub air: bool,
+    /// Heure de la dernière photo reçue du serveur, et temps écoulé depuis sa
+    /// réception : le serveur en déduit la latence aller-retour.
+    pub echo: f64,
+    pub echo_delay: f32,
+    /// Joueur mort ou hors jeu : seul l'écho compte, le reste est ignoré.
+    pub idle: bool,
 }
 
 /// Messages fiables serveur -> client.
@@ -187,6 +193,8 @@ pub struct PlayerSnap {
     pub money: u32,
     pub kills: u16,
     pub assists: u16,
+    /// Latence aller-retour vers le serveur, en millisecondes (0 pour un bot).
+    pub ping: u16,
     pub deaths: u16,
     /// 0 rien, 1 pose la bombe, 2 désamorce.
     pub action: u8,
