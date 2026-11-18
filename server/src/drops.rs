@@ -4,7 +4,7 @@
 use crate::game::Server;
 use cesi_common::glam::{vec3, Vec3};
 use cesi_common::physics::eye_height;
-use cesi_common::protocol::{Phase, PlayerId, ServerMsg};
+use cesi_common::protocol::{BombState, Phase, PlayerId, ServerMsg};
 use cesi_common::weapons::{weapon, Class, PICKUP_RANGE};
 use cesi_common::{dir_from_angles, hdist};
 
@@ -88,7 +88,31 @@ impl Server {
         let dir = dir_from_angles(yaw, 0.0);
         // Elle retombe à 1,4 m, ou au pied de l'obstacle s'il y en a un devant.
         let reach = self.world.raycast(eye, dir, 1.7).map_or(1.4, |h| (h.dist - 0.3).max(0.0));
+        // Une arme jetée ne peut plus être revendue (sinon on pourrait la donner puis se la faire rembourser).
+        self.forget_weapon_purchases(i, slot == 1);
         self.place(wid, eye + dir * reach, yaw + 1.2, Some((mag, reserve)), Some(pid));
+    }
+
+    /// Point au sol à l'aplomb de `pos`.
+    pub(crate) fn ground_below(&self, pos: Vec3) -> Vec3 {
+        let from = pos + Vec3::Y * 0.3;
+        from - Vec3::Y * self.world.raycast(from, -Vec3::Y, 40.0).map_or(0.3, |h| h.dist)
+    }
+
+    /// Le porteur `i` lâche la bombe devant lui ; un coéquipier la ramasse en passant dessus.
+    pub(crate) fn drop_bomb(&mut self, i: usize) {
+        let p = &mut self.players[i];
+        if !p.alive || self.bomb != BombState::Carried(p.id) || !matches!(self.phase, Phase::Freeze | Phase::Live) {
+            return;
+        }
+        p.action = 0;
+        p.progress = 0.0;
+        let (pid, yaw) = (p.id, p.yaw);
+        let eye = p.pos + Vec3::Y * eye_height(if p.crouch { 1.0 } else { 0.0 });
+        let dir = dir_from_angles(yaw, 0.0);
+        let reach = self.world.raycast(eye, dir, 1.7).map_or(1.4, |h| (h.dist - 0.3).max(0.0));
+        self.bomb = BombState::Dropped(self.ground_below(eye + dir * reach));
+        self.bomb_block = Some((pid, self.time + OWNER_DELAY));
     }
 
     /// Le joueur `i` prend l'arme au sol `id`. S'il en portait une du même emplacement
@@ -101,6 +125,7 @@ impl Server {
             return;
         }
         let d = self.drops.remove(k);
+        self.forget_weapon_purchases(i, is_pistol(d.weapon));
         let p = &mut self.players[i];
         let slot = if is_pistol(d.weapon) { &mut p.secondary } else { &mut p.primary };
         let old = std::mem::replace(slot, d.weapon);
@@ -209,6 +234,40 @@ mod tests {
         s.auto_pickup();
         assert_eq!(s.players[0].primary, 7);
         assert!(s.drops.is_empty());
+    }
+
+    #[test]
+    fn dropped_bomb_goes_to_a_teammate_not_back_to_the_carrier() {
+        let mut s = server();
+        let mut mate = Player::new(2, "Ami".into(), Team::T, 800, None);
+        mate.alive = true;
+        mate.pos = s.players[0].pos + vec3(0.0, 0.0, -4.0);
+        s.players.push(mate);
+        s.bomb = BombState::Carried(1);
+        s.drop_bomb(0);
+        let BombState::Dropped(spot) = s.bomb else { panic!("la bombe doit être au sol : {:?}", s.bomb) };
+        assert!((spot.y - s.players[0].pos.y).abs() < 0.1, "elle repose au sol");
+        // Le porteur qui avance dessus ne la reprend pas tout de suite…
+        s.players[0].pos = vec3(spot.x, spot.y, spot.z);
+        s.update_bomb(0.016);
+        assert!(matches!(s.bomb, BombState::Dropped(_)));
+        // … mais un coéquipier qui passe dessus la ramasse.
+        s.players[0].pos = spot + vec3(3.0, 0.0, 0.0);
+        s.players[1].pos = spot + vec3(0.3, 0.0, 0.0);
+        s.update_bomb(0.016);
+        assert_eq!(s.bomb, BombState::Carried(2));
+    }
+
+    #[test]
+    fn bomb_of_a_carrier_killed_in_the_air_falls_to_the_ground() {
+        let mut s = server();
+        let ground = s.players[0].pos;
+        s.bomb = BombState::Carried(1);
+        s.players[0].pos = ground + Vec3::Y * 1.5;
+        s.damage(0, None, 500.0, 1.0, 1, 0, ground);
+        assert_eq!(s.bomb, BombState::Dropped(s.ground_below(ground)));
+        let BombState::Dropped(spot) = s.bomb else { unreachable!() };
+        assert!((spot.y - ground.y).abs() < 0.1);
     }
 
     #[test]

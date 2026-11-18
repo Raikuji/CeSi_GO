@@ -18,7 +18,7 @@ mod viewmodel;
 use audio::Audio;
 use cesi_common::map::{self, MAPS};
 use cesi_common::voxel::{World, VS};
-use cesi_common::protocol::ClientMsg;
+use cesi_common::protocol::{BuyItem, ClientMsg};
 use cesi_server::{Server, ServerConfig};
 use game::{Game, Overlay, Status};
 use macroquad::prelude::*;
@@ -51,7 +51,7 @@ fn window_conf() -> macroquad::conf::Conf {
 struct LocalServer {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
-    _cmds: mpsc::Sender<String>,
+    cmds: mpsc::Sender<String>,
 }
 
 impl Drop for LocalServer {
@@ -81,7 +81,7 @@ fn start_local(s: &Settings) -> Result<(LocalServer, String), String> {
     let (tx, rx) = mpsc::channel::<String>();
     let flag = stop.clone();
     let thread = std::thread::spawn(move || server.run(rx, flag));
-    Ok((LocalServer { stop, thread: Some(thread), _cmds: tx }, addr))
+    Ok((LocalServer { stop, thread: Some(thread), cmds: tx }, addr))
 }
 
 /// Dessine la carte seule depuis un point de vue donné.
@@ -202,6 +202,8 @@ async fn main() {
     // --connect <adresse> : rejoint directement un serveur au lancement.
     let mut autojoin = args.iter().position(|a| a == "--connect").and_then(|i| args.get(i + 1).cloned());
     let (mut field_step, mut field_clip) = (0u32, None);
+    // « --shot revente » : achats faits une seule fois avant la capture.
+    let mut shop_done: Option<f64> = None;
 
     loop {
         let dt = get_frame_time().min(0.1);
@@ -332,7 +334,7 @@ async fn main() {
                     menu.screen = Screen::Settings;
                     menu.tab = ["options", "touches", "viseur"].iter().position(|m| m == mode).unwrap_or(0);
                 }
-                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" | "nade" | "main" | "sol" | "echange" | "jeter" | "degats"
+                "jeu" | "achats" | "scores" | "tir" | "couteau" | "coup" | "coup2" | "coup3" | "poses" | "vm" | "nade" | "main" | "sol" | "echange" | "jeter" | "degats" | "revente" | "bombe"
                     if game.is_none() && start.is_none() =>
                 {
                     start = Some(true);
@@ -367,13 +369,42 @@ async fn main() {
             }
             // « sol » regarde par terre ; « echange » ramasse en plus les armes visées (deux fois).
             // « jeter » jette l'arme en main puis regarde où elle est tombée.
+            // « bombe » : le porteur lâche la bombe puis regarde où elle est tombée.
+            if mode == "bombe" && !g.has_bomb() && !g.debug_look {
+                if let (Some(srv), Some(me)) = (server.as_ref(), g.me()) {
+                    if me.alive && me.team == cesi_common::protocol::Team::T {
+                        let _ = srv.cmds.send(format!("bomb {}", me.id));
+                    }
+                }
+            }
+            if mode == "bombe" && !g.debug_look && g.has_bomb() {
+                g.debug_look = true;
+                g.debug_drop_bomb = true;
+            }
             if (mode == "sol" || mode == "echange" || mode == "jeter") && !g.debug_look {
                 g.debug_look = true;
                 g.debug_pick = if mode == "echange" { 2 } else { 0 };
                 g.debug_drop = mode == "jeter";
             }
-            if mode == "achats" && g.can_buy() {
+            if (mode == "achats" || mode == "revente") && g.can_buy() {
                 g.overlay = Overlay::Buy;
+            }
+            // « revente » : achète un pistolet et deux grenades pour montrer les boutons de revente.
+            // Deux secondes plus tard, revend le pistolet : on doit retrouver le P-9 et 300 $.
+            if mode == "revente" && g.can_buy() && g.me().is_some_and(|m| m.alive) {
+                match shop_done {
+                    None => {
+                        shop_done = Some(get_time());
+                        for item in [BuyItem::Weapon(2), BuyItem::Grenade(1), BuyItem::Grenade(2)] {
+                            g.buy(item, &audio);
+                        }
+                    }
+                    Some(t) if t > 0.0 && get_time() - t > 2.0 => {
+                        shop_done = Some(-1.0);
+                        g.sell(BuyItem::Weapon(2), &audio);
+                    }
+                    _ => {}
+                }
             }
             g.debug = match mode.as_str() {
                 "tir" => 1,

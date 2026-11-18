@@ -23,6 +23,7 @@ pub enum Action {
     Reload,
     Use,
     Drop,
+    DropBomb,
     Buy,
     Scoreboard,
     Primary,
@@ -37,7 +38,7 @@ pub enum Action {
 }
 
 /// (action, identifiant dans le fichier, libellé du menu)
-pub const ACTIONS: [(Action, &str, &str); 23] = [
+pub const ACTIONS: [(Action, &str, &str); 24] = [
     (Action::Forward, "forward", "Avancer"),
     (Action::Back, "back", "Reculer"),
     (Action::Left, "left", "Gauche"),
@@ -50,6 +51,7 @@ pub const ACTIONS: [(Action, &str, &str); 23] = [
     (Action::Reload, "reload", "Recharger"),
     (Action::Use, "use", "Poser / désamorcer / échanger"),
     (Action::Drop, "drop", "Jeter l'arme"),
+    (Action::DropBomb, "drop_bomb", "Lâcher la bombe"),
     (Action::Buy, "buy", "Menu d'achat"),
     (Action::Scoreboard, "scoreboard", "Tableau des scores"),
     (Action::Primary, "primary", "Arme principale"),
@@ -132,6 +134,7 @@ fn default_bind(a: Action) -> Bind {
         Action::Reload => Bind::Key(KeyCode::R),
         Action::Use => Bind::Key(KeyCode::E),
         Action::Drop => Bind::Key(KeyCode::G),
+        Action::DropBomb => Bind::Key(KeyCode::H),
         Action::Buy => Bind::Key(KeyCode::B),
         Action::Scoreboard => Bind::Key(KeyCode::Tab),
         Action::Primary => Bind::Key(KeyCode::Key1),

@@ -59,6 +59,23 @@ Attaquants).
 Une fois éliminé, le coin haut gauche affiche les dégâts infligés pendant le
 round : joueur touché, nombre de touches, éliminations et total.
 
+## Bombe
+
+Un attaquant reçoit la bombe au début de chaque round. Si le porteur meurt,
+elle tombe au sol ; la touche `H` permet aussi de la lâcher devant soi pour la
+confier à un coéquipier. N'importe quel attaquant la ramasse en passant
+dessus (celui qui vient de la lâcher doit d'abord s'en éloigner). Les
+attaquants sont prévenus quand elle tombe ou change de main, et la voient sur
+la minimap.
+
+## Revente
+
+Tant que les achats sont ouverts et que vous êtes dans la zone d'achat, ce que
+vous avez acheté pendant le round se revend au prix payé : cliquez sur le
+bouton « +… $ » de l'article dans le menu d'achat. On retrouve ce qu'on avait
+avant (l'ancienne arme, l'ancien gilet). Une arme jetée ou échangée, un gilet
+abîmé ou une grenade lancée ne se revendent plus.
+
 ## Grenades
 
 Quatre grenades s'achètent dans le menu d'achat (quatre au maximum, une de

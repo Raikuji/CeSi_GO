@@ -6,5 +6,6 @@ mod drops;
 mod game;
 mod nades;
 mod nav;
+mod shop;
 
 pub use game::{Server, ServerConfig};

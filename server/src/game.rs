@@ -12,7 +12,7 @@ use cesi_common::physics::eye_height;
 use cesi_common::protocol::*;
 use cesi_common::voxel::World;
 use cesi_common::weapons::*;
-use cesi_common::Rng;
+use cesi_common::{hdist, Rng};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::net::{SocketAddr, UdpSocket};
@@ -122,6 +122,10 @@ pub struct Player {
     fire_budget: f32,
     switch_team: bool,
     last_state: u32,
+    /// Achats du round, revendables tant que les achats sont ouverts.
+    pub(crate) bought: Vec<crate::shop::Purchase>,
+    /// Dernière liste de reventes envoyée au joueur.
+    pub(crate) refunds_sent: Vec<(BuyItem, u32)>,
 }
 
 impl Player {
@@ -158,6 +162,8 @@ impl Player {
             history: VecDeque::new(),
             fire_budget: 2.0,
             switch_team: false,
+            bought: Vec::new(),
+            refunds_sent: Vec::new(),
             last_state: 0,
         }
     }
@@ -217,6 +223,8 @@ pub struct Server {
     pub(crate) next_nade: u16,
     pub(crate) drops: Vec<Drop>,
     pub(crate) next_drop: u16,
+    /// Celui qui vient de lâcher la bombe ne la reprend pas aussitôt : (joueur, à partir de quand).
+    pub(crate) bomb_block: Option<(PlayerId, f64)>,
 }
 
 /// Intersection rayon / boîte ; renvoie la distance d'entrée.
@@ -307,6 +315,7 @@ impl Server {
             next_nade: 0,
             drops: Vec::new(),
             next_drop: 0,
+            bomb_block: None,
         })
     }
 
@@ -572,8 +581,12 @@ impl Server {
             ClientMsg::Throw { kind, origin, dir, strong } => self.throw_nade(i, kind, origin, dir, strong),
             ClientMsg::Pickup { id, mag, reserve } => self.pickup(i, id, mag, reserve, false),
             ClientMsg::Drop { slot, mag, reserve } => self.throw_weapon(i, slot, mag, reserve),
+            ClientMsg::DropBomb => self.drop_bomb(i),
             ClientMsg::Buy(item) => {
                 self.try_buy(i, item);
+            }
+            ClientMsg::Sell(item) => {
+                self.sell(i, item);
             }
             ClientMsg::SwitchTeam => {
                 let p = &mut self.players[i];
@@ -601,6 +614,7 @@ impl Server {
         if self.conns.is_empty() {
             return;
         }
+        self.sync_refunds();
         let time_left = match (self.phase, self.bomb) {
             (Phase::Live, BombState::Planted { time_left, .. }) => time_left,
             _ => self.timer,
@@ -801,6 +815,10 @@ impl Server {
         self.areas.clear();
         self.drops.clear();
         self.t_site = self.rng.below(2) as u8;
+        self.bomb_block = None;
+        for p in &mut self.players {
+            p.bought.clear();
+        }
         for i in 0..self.players.len() {
             if !self.players[i].alive || self.players[i].fresh {
                 self.equip_fresh(i);
@@ -972,7 +990,7 @@ impl Server {
         }
     }
 
-    fn update_bomb(&mut self, dt: f32) {
+    pub(crate) fn update_bomb(&mut self, dt: f32) {
         match self.bomb {
             BombState::Carried(id) => {
                 let Some(i) = self.idx(id) else {
@@ -1006,12 +1024,19 @@ impl Server {
                 }
             }
             BombState::Dropped(pos) => {
-                if let Some(p) = self
-                    .players
-                    .iter()
-                    .find(|p| p.alive && p.team == Team::T && p.pos.distance(pos) < 1.2)
-                {
+                // Celui qui l'a lâchée peut la reprendre après 1 s, une fois éloigné.
+                if let Some((owner, at)) = self.bomb_block {
+                    let near = self.players.iter().any(|p| p.id == owner && p.alive && hdist(p.pos, pos) < 1.3);
+                    if self.time >= at && !near {
+                        self.bomb_block = None;
+                    }
+                }
+                let block = self.bomb_block.map(|(o, _)| o);
+                if let Some(p) = self.players.iter().find(|p| {
+                    p.alive && p.team == Team::T && Some(p.id) != block && hdist(p.pos, pos) < 1.0 && (p.pos.y - pos.y).abs() < 1.2
+                }) {
                     self.bomb = BombState::Carried(p.id);
+                    self.bomb_block = None;
                 }
             }
             BombState::Planted { pos, time_left, site } => {
@@ -1063,11 +1088,21 @@ impl Server {
         }
     }
 
-    fn can_buy(&self) -> bool {
+    pub(crate) fn can_buy(&self) -> bool {
         self.phase == Phase::Freeze || (self.phase == Phase::Live && self.round_elapsed < self.cfg.buy_time)
     }
 
-    fn try_buy(&mut self, i: usize, item: BuyItem) -> bool {
+    pub(crate) fn try_buy(&mut self, i: usize, item: BuyItem) -> bool {
+        let (before, money) = (self.inventory(i), self.players[i].money);
+        if !self.buy_item(i, item) {
+            return false;
+        }
+        let paid = money - self.players[i].money;
+        self.record_purchase(i, item, before, paid);
+        true
+    }
+
+    fn buy_item(&mut self, i: usize, item: BuyItem) -> bool {
         if !self.can_buy() {
             return false;
         }
@@ -1316,7 +1351,8 @@ impl Server {
         v.progress = 0.0;
         let (vid, vname, vpos) = (v.id, v.name.clone(), v.pos);
         if self.bomb == BombState::Carried(vid) {
-            self.bomb = BombState::Dropped(vpos);
+            // Elle tombe au sol, même si le porteur meurt en plein saut.
+            self.bomb = BombState::Dropped(self.ground_below(vpos));
         }
         // Son arme reste au sol : la principale, sinon le pistolet.
         let v = &mut self.players[victim];
@@ -1567,6 +1603,15 @@ impl Server {
                     (self.log)(&format!("{} = {} (les durées s'appliquent au prochain round)", key, val));
                 } else {
                     (self.log)("Usage : set <round_time|freeze_time|buy_time|bomb_time|max_rounds|start_money|max_players|name> <valeur>");
+                }
+            }
+            "bomb" => {
+                // Diagnostic : « bomb <joueur> » donne la bombe à un attaquant vivant.
+                match rest.split_whitespace().next().and_then(|w| self.find_player(w)) {
+                    Some(i) if self.players[i].alive && self.players[i].team == Team::T => {
+                        self.bomb = BombState::Carried(self.players[i].id);
+                    }
+                    _ => out!("Usage : bomb <id|nom> (attaquant vivant)"),
                 }
             }
             "drop" => {

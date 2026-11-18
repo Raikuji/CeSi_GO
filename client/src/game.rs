@@ -151,6 +151,8 @@ pub struct Game {
     pub killfeed: Vec<KillLine>,
     /// Dégâts infligés depuis le début du round, affichés à la mort.
     pub round_dmg: Vec<DmgLine>,
+    /// Achats de ce round revendables maintenant, avec le montant rendu.
+    pub refunds: Vec<(BuyItem, u32)>,
     /// Diagnostic : affiche le bilan des dégâts même en vie, avec des valeurs d'exemple.
     pub debug_dmg: bool,
     pub chat: Vec<(String, Option<Team>, String, f64)>,
@@ -186,6 +188,8 @@ pub struct Game {
     pub debug_pick: u8,
     /// Diagnostic : jette l'arme en main quelques secondes après le début.
     pub debug_drop: bool,
+    /// Diagnostic : lâche la bombe quelques secondes après le début.
+    pub debug_drop_bomb: bool,
     pub rng: Rng,
 }
 
@@ -290,6 +294,7 @@ impl Game {
             chat_input: String::new(),
             killfeed: Vec::new(),
             round_dmg: Vec::new(),
+            refunds: Vec::new(),
             debug_dmg: false,
             chat: Vec::new(),
             center: None,
@@ -316,6 +321,7 @@ impl Game {
             debug_look: false,
             debug_pick: 0,
             debug_drop: false,
+            debug_drop_bomb: false,
             rng: Rng::from_time(),
         })
     }
@@ -567,6 +573,7 @@ impl Game {
                     self.killfeed.remove(0);
                 }
             }
+            ServerMsg::Refunds(list) => self.refunds = list,
             ServerMsg::RoundStart { round } => {
                 self.round_dmg.clear();
                 self.corpses.clear();
@@ -675,6 +682,29 @@ impl Game {
             Some(o) if (sample - o).abs() < 0.25 => o + (sample - o) * 0.05,
             _ => sample,
         });
+        // La bombe tombe ou change de main : les attaquants sont prévenus.
+        let prev_bomb = self.snaps.back().map(|l| l.bomb);
+        let my_team = self.me().map(|m| m.team);
+        if my_team == Some(Team::T) {
+            match (prev_bomb, s.bomb) {
+                (Some(BombState::Carried(a)), BombState::Dropped(_)) => {
+                    let who = s.players.iter().find(|p| p.id == a);
+                    let text = match who {
+                        Some(p) if p.alive => format!("{} a lâché la bombe", p.name),
+                        _ => "La bombe est au sol".to_string(),
+                    };
+                    self.chat.push((String::new(), None, text, self.now));
+                }
+                (Some(BombState::Dropped(_)), BombState::Carried(b)) => {
+                    if Some(b) == self.my_id {
+                        self.center = Some(("Vous avez la bombe".to_string(), self.now + 2.0, Color::new(1.0, 0.5, 0.25, 1.0)));
+                    } else if let Some(p) = s.players.iter().find(|p| p.id == b) {
+                        self.chat.push((String::new(), None, format!("{} a ramassé la bombe", p.name), self.now));
+                    }
+                }
+                _ => {}
+            }
+        }
         for p in &s.players {
             if self.alive_prev.insert(p.id, p.alive) == Some(true) && !p.alive {
                 self.corpses.push(Corpse { pos: p.pos, yaw: p.yaw, team: p.team, t0: self.now });
@@ -978,6 +1008,13 @@ impl Game {
                     self.debug_drop = false;
                     audio.play("throw", 0.5);
                 }
+                // Lâcher la bombe devant soi, pour qu'un coéquipier la ramasse.
+                let auto_bomb = self.debug_drop_bomb && self.now - self.start > 7.0;
+                if (st.pressed(Action::DropBomb) || auto_bomb) && self.has_bomb() {
+                    self.net.reliable(ClientMsg::DropBomb);
+                    self.debug_drop_bomb = false;
+                    audio.play("throw", 0.5);
+                }
                 // Grenades : une touche par type…
                 for (k, a) in NADE_ACTIONS.into_iter().enumerate() {
                     if st.pressed(a) && me.nades[k] > 0 && self.throw_t <= 0.0 {
@@ -1264,6 +1301,12 @@ impl Game {
     pub fn buy(&mut self, item: BuyItem, audio: &Audio) {
         self.net.reliable(ClientMsg::Buy(item));
         audio.play("buy", 0.5);
+    }
+
+    /// Revend un achat de ce round.
+    pub fn sell(&mut self, item: BuyItem, audio: &Audio) {
+        self.net.reliable(ClientMsg::Sell(item));
+        audio.play("buy", 0.4);
     }
 
     /// Dessine la scène 3D.

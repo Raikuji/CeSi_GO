@@ -3,7 +3,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL: u16 = 7;
+pub const PROTOCOL: u16 = 9;
 pub const DEFAULT_PORT: u16 = 27500;
 pub const TICK_RATE: u32 = 60;
 
@@ -93,6 +93,8 @@ pub enum ClientMsg {
     /// `heavy` : coup de couteau puissant (clic droit).
     Fire { weapon: u8, origin: Vec3, dir: Vec3, render_time: f64, heavy: bool },
     Buy(BuyItem),
+    /// Revend un objet acheté pendant ce round (achats encore ouverts).
+    Sell(BuyItem),
     /// Lancer de grenade ; `strong` : lancer long (sinon lancer court).
     Throw { kind: u8, origin: Vec3, dir: Vec3, strong: bool },
     /// Prend l'arme au sol `id` ; `mag` et `reserve` sont les munitions de l'arme
@@ -100,6 +102,8 @@ pub enum ClientMsg {
     Pickup { id: u16, mag: u16, reserve: u16 },
     /// Jette l'arme de l'emplacement `slot` (0 principale, 1 pistolet) avec ses munitions.
     Drop { slot: u8, mag: u16, reserve: u16 },
+    /// Le porteur lâche la bombe devant lui (pour la donner à un coéquipier).
+    DropBomb,
     SwitchTeam,
     Chat(String),
 }
@@ -149,6 +153,8 @@ pub enum ServerMsg {
     /// Arme ramassée au sol, avec les munitions qu'elle contenait.
     /// `auto` : ramassée en passant dessus.
     Picked { weapon: u8, mag: u16, reserve: u16, auto: bool },
+    /// Objets revendables maintenant et montant rendu, envoyé quand la liste change.
+    Refunds(Vec<(BuyItem, u32)>),
     Chat { from: String, team: Option<Team>, text: String },
 }
 

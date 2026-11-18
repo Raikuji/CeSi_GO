@@ -203,8 +203,9 @@ impl Game {
             ui.shadow_px(&format!("{} $", me.money), 24.0 * k, h - 92.0 * k, 24.0 * k, Color::new(0.55, 0.9, 0.45, 1.0));
             let mut x = 150.0 * k;
             if self.has_bomb() {
-                ui.shadow_px("BOMBE", x, h - 92.0 * k, 18.0 * k, Color::new(1.0, 0.5, 0.25, 1.0));
-                x += 80.0 * k;
+                let t = format!("BOMBE [{}]", st.bind(Action::DropBomb).label());
+                ui.shadow_px(&t, x, h - 92.0 * k, 18.0 * k, Color::new(1.0, 0.5, 0.25, 1.0));
+                x += ui.width_px(&t, 18.0 * k) + 20.0 * k;
             }
             if me.kit {
                 ui.shadow_px("KIT", x, h - 92.0 * k, 18.0 * k, CT_COLOR);
@@ -395,22 +396,35 @@ impl Game {
         let cols = [56.0, 352.0, 648.0, 944.0];
         let mut info: Option<String> = None;
         let mut order: Option<BuyItem> = None;
-        // Ligne d'article : (cliquée, survolée). `state` remplace le prix quand l'article n'est plus achetable.
-        let row = |ui: &mut Ui, x: f32, y: f32, name: &str, price: u32, state: Option<&str>| -> (bool, bool) {
+        let refunds = self.refunds.clone();
+        let refund = |item: BuyItem| refunds.iter().find(|(i, _)| *i == item).map(|(_, v)| *v);
+        let mut sold: Option<BuyItem> = None;
+        // Ligne d'article : (achat cliqué, survolée, revente cliquée, revente survolée).
+        // `state` remplace le prix quand l'article n'est plus achetable ; `refund` affiche
+        // à droite un bouton de revente (achat de ce round).
+        let row = |ui: &mut Ui, x: f32, y: f32, name: &str, price: u32, state: Option<&str>, refund: Option<u32>| -> (bool, bool, bool, bool) {
             let r = Rect::new(x, y, W, 38.0);
+            let sell_r = Rect::new(x + W - 94.0, y + 5.0, 88.0, 28.0);
+            let sell_hot = refund.is_some() && ui.hover(sell_r);
             let afford = me.money >= price && state.is_none();
             let hot = ui.hover(r);
-            ui.rect(r, if hot && afford { WIDGET_HOT } else { WIDGET });
-            if hot && afford {
+            let buy_hot = hot && afford && !sell_hot;
+            ui.rect(r, if buy_hot { WIDGET_HOT } else { WIDGET });
+            if buy_hot {
                 ui.rect(Rect::new(r.x, r.y, 4.0, r.h), ACCENT);
             }
-            ui.text(name, x + 14.0, y + 26.0, 19.0, if afford { TEXT } else { DIM });
-            match state {
-                Some(t) => ui.text_r(t, x + W - 12.0, y + 26.0, 15.0, DIM),
-                None => ui.text_r(&format!("{} $", price), x + W - 12.0, y + 26.0, 18.0, if afford { green } else { Color::new(0.8, 0.35, 0.3, 1.0) }),
+            ui.text(name, x + 14.0, y + 26.0, 19.0, if afford || refund.is_some() { TEXT } else { DIM });
+            match (refund, state) {
+                (Some(v), _) => {
+                    ui.rect(sell_r, if sell_hot { ACCENT } else { Color::new(0.96, 0.60, 0.14, 0.22) });
+                    ui.text_c(&format!("+{} $", v), sell_r.x + sell_r.w / 2.0, y + 25.0, 16.0, if sell_hot { BLACK } else { ACCENT });
+                }
+                (None, Some(t)) => ui.text_r(t, x + W - 12.0, y + 26.0, 15.0, DIM),
+                (None, None) => ui.text_r(&format!("{} $", price), x + W - 12.0, y + 26.0, 18.0, if afford { green } else { Color::new(0.8, 0.35, 0.3, 1.0) }),
             }
-            (hot && afford && ui.click, hot)
+            (buy_hot && ui.click, hot, sell_hot && ui.click, sell_hot)
         };
+        let sell_info = |name: &str, v: u32| format!("Revendre {} : {} $ rendus (acheté pendant ce round)", name, v);
 
         let groups = [
             (Class::Pistol, cols[0], 150.0),
@@ -424,11 +438,17 @@ impl Game {
             let mut y = y0 + 28.0;
             for d in WEAPONS.iter().filter(|d| d.class == class) {
                 let owned = me.primary == d.id || me.secondary == d.id;
-                let (click, hot) = row(ui, x, y, d.name, d.price, owned.then_some("possédé"));
+                let back = refund(BuyItem::Weapon(d.id));
+                let (click, hot, sell, sell_hot) = row(ui, x, y, d.name, d.price, owned.then_some("possédé"), back);
                 if click {
                     order = Some(BuyItem::Weapon(d.id));
                 }
-                if hot {
+                if sell {
+                    sold = Some(BuyItem::Weapon(d.id));
+                }
+                if sell_hot {
+                    info = Some(sell_info(d.name, back.unwrap_or(0)));
+                } else if hot {
                     info = Some(format!(
                         "{} — dégâts {:.0} · cadence {:.0}/min · chargeur {} · pénétration du gilet {:.0} % · prime {} $",
                         d.name,
@@ -455,15 +475,23 @@ impl Game {
                 BuyItem::KevlarHelmet,
                 "Gilet + casque — protège aussi des tirs à la tête",
             ),
-            ("Kit de désamorçage", PRICE_KIT, me.kit || me.team != Team::CT, BuyItem::Kit, "Kit de désamorçage — désamorce en 5 s au lieu de 10 (Défenseurs)"),
+            ("Kit de désamorçage", PRICE_KIT, me.kit, BuyItem::Kit, "Kit de désamorçage — désamorce en 5 s au lieu de 10 (Défenseurs)"),
         ];
         let mut y = 388.0;
         for (name, price, owned, item, text) in gear {
-            let (click, hot) = row(ui, cols[0], y, name, price, owned.then_some("possédé"));
+            let back = refund(item);
+            // Le kit est réservé aux Défenseurs.
+            let state = if owned { Some("possédé") } else if item == BuyItem::Kit && me.team != Team::CT { Some("Défenseurs") } else { None };
+            let (click, hot, sell, sell_hot) = row(ui, cols[0], y, name, price, state, back);
             if click {
                 order = Some(item);
             }
-            if hot {
+            if sell {
+                sold = Some(item);
+            }
+            if sell_hot {
+                info = Some(sell_info(name, back.unwrap_or(0)));
+            } else if hot {
                 info = Some(text.to_string());
             }
             y += 44.0;
@@ -484,11 +512,17 @@ impl Game {
             } else {
                 None
             };
-            let (click, hot) = row(ui, cols[3], y, &name, g.price, state);
+            let back = refund(BuyItem::Grenade(k as u8));
+            let (click, hot, sell, sell_hot) = row(ui, cols[3], y, &name, g.price, state, back);
             if click {
                 order = Some(BuyItem::Grenade(k as u8));
             }
-            if hot {
+            if sell {
+                sold = Some(BuyItem::Grenade(k as u8));
+            }
+            if sell_hot {
+                info = Some(sell_info(labels[k], back.unwrap_or(0)));
+            } else if hot {
                 info = Some(g.info.to_string());
             }
             y += 44.0;
@@ -503,8 +537,14 @@ impl Game {
             ui.text(&t, 56.0, 590.0, 16.0, TEXT);
         }
         ui.text(&format!("[{}] ou [Échap] pour fermer", st.bind(Action::Buy).label()), 56.0, 636.0, 15.0, DIM);
+        if !self.refunds.is_empty() {
+            ui.text("Cliquez sur « +… $ » pour revendre un achat de ce round", 400.0, 636.0, 15.0, ACCENT);
+        }
         if let Some(item) = order {
             self.buy(item, audio);
+        }
+        if let Some(item) = sold {
+            self.sell(item, audio);
         }
         if st.pressed(Action::Buy) && self.overlay_since < self.now {
             self.overlay = Overlay::None;
