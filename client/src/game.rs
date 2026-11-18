@@ -179,6 +179,40 @@ fn fovy_from(fov: f32) -> f32 {
     2.0 * ((fov.to_radians() / 2.0).tan() * 0.75).atan()
 }
 
+/// Molette : prochaine entrée (emplacement, type de grenade) dans l'ordre arme
+/// principale, pistolet, couteau, puis chaque type de grenade possédé, en boucle.
+/// `has` : arme principale et pistolet présents ; `cur` : emplacement et grenade actuels.
+fn wheel_next(has: [bool; 2], owned: &[usize], cur: (usize, usize), forward: bool) -> (usize, usize) {
+    let mut order: Vec<(usize, usize)> = (0..3).filter(|s| *s == 2 || has[*s]).map(|s| (s, 0)).collect();
+    order.extend(owned.iter().map(|k| (3, *k)));
+    let cur = if cur.0 == 3 { cur } else { (cur.0, 0) };
+    let i = order.iter().position(|e| *e == cur).unwrap_or(0) as i32;
+    let n = order.len() as i32;
+    order[((i + if forward { 1 } else { -1 }) + n) as usize % n as usize]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wheel_next;
+
+    #[test]
+    fn wheel_goes_through_every_grenade_type() {
+        let (has, owned) = ([true, true], [0, 1, 3]);
+        let mut cur = (0, 0);
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            cur = wheel_next(has, &owned, cur, true);
+            seen.push(cur);
+        }
+        assert_eq!(seen, [(1, 0), (2, 0), (3, 0), (3, 1), (3, 3), (0, 0)]);
+        // En arrière depuis l'arme principale : la dernière grenade.
+        assert_eq!(wheel_next(has, &owned, (0, 0), false), (3, 3));
+        assert_eq!(wheel_next(has, &owned, (3, 1), false), (3, 0));
+        // Sans arme principale ni grenade : pistolet et couteau seulement.
+        assert_eq!(wheel_next([false, true], &[], (2, 0), true), (1, 0));
+    }
+}
+
 impl Game {
     pub fn connect(addr: &str, name: &str, world: Rc<World>, info: Rc<MapInfo>) -> Result<Game, String> {
         let net = NetClient::connect(addr, name)?;
@@ -944,16 +978,22 @@ impl Game {
                         self.switch_to(3);
                     }
                 }
+                // Molette : armes, couteau, puis chaque type de grenade possédé, en boucle.
                 let wheel = mouse_wheel().1;
-                if wheel != 0.0 {
-                    let avail: Vec<usize> = (0..4).filter(|s| match *s {
-                        2 => true,
-                        3 => !owned.is_empty(),
-                        s => self.ammo[s].id != 0,
-                    }).collect();
-                    let i = avail.iter().position(|s| *s == self.slot).unwrap_or(0) as i32;
-                    let n = avail.len() as i32;
-                    self.switch_to(avail[((i + if wheel < 0.0 { 1 } else { -1 }) + n) as usize % n as usize]);
+                if wheel != 0.0 && !(self.slot == 3 && self.throw_t > 0.0) {
+                    let has = [self.ammo[0].id != 0, self.ammo[1].id != 0];
+                    let (slot, kind) = wheel_next(has, &owned, (self.slot, self.nade), wheel < 0.0);
+                    if slot != 3 {
+                        self.switch_to(slot);
+                    } else if self.slot == 3 {
+                        if self.nade != kind {
+                            self.nade = kind;
+                            self.draw_t = 0.25;
+                        }
+                    } else {
+                        self.nade = kind;
+                        self.switch_to(3);
+                    }
                 }
             }
             let def = weapon(self.weapon_id());

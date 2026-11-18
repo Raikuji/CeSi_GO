@@ -55,7 +55,8 @@ Attaquants).
 Quatre grenades s'achètent dans le menu d'achat (quatre au maximum, une de
 chaque type, deux aveuglantes). Chaque type a sa touche : `5` fragmentation,
 `6` fumigène, `7` aveuglante, `8` incendiaire ; la touche `4` prend une grenade
-en main, puis passe au type suivant. Clic gauche pour un lancer long, clic
+en main, puis passe au type suivant. La molette fait défiler les armes puis
+chaque type de grenade possédé. Clic gauche pour un lancer long, clic
 droit pour un lancer court.
 
 | Grenade | Prix | Effet |
