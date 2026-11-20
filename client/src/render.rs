@@ -507,6 +507,14 @@ pub fn grip(id: u8) -> Grip {
             rack: vec3(0.045, 0.04, 0.0),
             muzzle: 0.68,
         },
+        Class::Shotgun => Grip {
+            hand: vec3(0.0, -0.08, -0.06),
+            // Main gauche sur la pompe ; au rechargement, elle glisse les cartouches par-dessous.
+            fore: vec3(0.0, -0.03, 0.33),
+            mag: vec3(0.0, -0.07, 0.06),
+            rack: vec3(0.0, -0.03, 0.26),
+            muzzle: 0.72,
+        },
         Class::Sniper => Grip {
             hand: vec3(0.0, -0.08, -0.08),
             fore: vec3(0.0, -0.045, 0.28),
@@ -913,6 +921,36 @@ pub fn weapon_model(b: &mut Batch, m: &Mat4, id: u8, pose: &WeaponPose) {
             c(m, 0.05, 0.03, -0.105 + z, 0.072, 0.068, -0.07 + z, rgb(20, 20, 22));
             if mag_on {
                 c(&mm, -0.013, -0.1, 0.06, 0.013, -0.02, 0.14, magc);
+            }
+        }
+        Class::Shotgun => {
+            // Sanglier : bois et acier, pompe mobile. Ouragan : noir, semi-automatique.
+            let pump = id == 13;
+            let (body, furn) = if pump { (rgb(58, 58, 64), wood) } else { (rgb(34, 36, 40), rgb(42, 44, 48)) };
+            c(m, -0.026, -0.02, -0.12, 0.026, 0.07, 0.16, body);
+            c(m, -0.013, 0.03, 0.16, 0.013, 0.058, 0.72, dark);
+            c(m, -0.012, -0.004, 0.16, 0.012, 0.024, 0.62, steel);
+            c(m, -0.004, 0.058, 0.69, 0.004, 0.072, 0.71, rgb(200, 200, 190));
+            c(m, -0.014, -0.13, -0.08, 0.014, -0.02, -0.04, if pump { wood } else { dark });
+            c(m, -0.019, -0.05, -0.44, 0.019, 0.06, -0.12, furn);
+            c(m, -0.022, -0.06, -0.47, 0.022, 0.07, -0.44, dark);
+            if pump {
+                // Pompe : tirée vers l'arrière entre deux tirs.
+                let z = -0.09 * s;
+                c(m, -0.027, -0.03, 0.24 + z, 0.027, 0.034, 0.42 + z, furn);
+                for k in 0..4 {
+                    let zz = 0.27 + k as f32 * 0.04 + z;
+                    c(m, -0.028, -0.025, zz, 0.028, 0.03, zz + 0.012, rgb(96, 64, 34));
+                }
+            } else {
+                c(m, -0.027, -0.03, 0.2, 0.027, 0.034, 0.44, furn);
+                c(m, 0.026, 0.035, 0.0 - 0.08 * s, 0.044, 0.052, 0.035 - 0.08 * s, rgb(96, 100, 112));
+                c(m, -0.006, 0.07, -0.06, 0.006, 0.085, 0.1, dark);
+            }
+            // Cartouche rouge tenue par la main gauche pendant le rechargement.
+            if pose.mag.length() > 0.005 {
+                c(&mm, -0.009, -0.075, 0.03, 0.009, -0.057, 0.09, rgb(170, 40, 34));
+                c(&mm, -0.0095, -0.0755, 0.03, 0.0095, -0.0565, 0.042, rgb(190, 160, 70));
             }
         }
         Class::Lmg => {

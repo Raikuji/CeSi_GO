@@ -456,7 +456,8 @@ impl Game {
             (Class::Pistol, cols[0], 150.0),
             (Class::Smg, cols[1], 150.0),
             (Class::Rifle, cols[2], 150.0),
-            (Class::Lmg, cols[1], 360.0),
+            (Class::Shotgun, cols[1], 360.0),
+            (Class::Lmg, cols[1], 490.0),
             (Class::Sniper, cols[2], 360.0),
         ];
         for (class, x, y0) in groups {
@@ -475,10 +476,11 @@ impl Game {
                 if sell_hot {
                     info = Some(sell_info(d.name, back.unwrap_or(0)));
                 } else if hot {
+                    let dmg = if d.pellets > 1 { format!("{:.0} × {} plombs", d.damage, d.pellets) } else { format!("{:.0}", d.damage) };
                     info = Some(format!(
-                        "{} — dégâts {:.0} · cadence {:.0}/min · chargeur {} · gilet {:.0} % · prime {} $ · {} kg, vitesse {:.0} %",
+                        "{} — dégâts {} · cadence {:.0}/min · chargeur {} · gilet {:.0} % · prime {} $ · {} kg, vitesse {:.0} %",
                         d.name,
-                        d.damage,
+                        dmg,
                         d.rpm,
                         d.mag,
                         d.armor_pen * 100.0,

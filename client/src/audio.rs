@@ -1,6 +1,6 @@
 //! Sons synthétisés au lancement (aucun fichier audio à distribuer).
 
-use cesi_common::weapons::Class;
+use cesi_common::weapons::{Class, WeaponDef};
 use macroquad::audio::{load_sound_from_bytes, play_sound, PlaySoundParams, Sound};
 use macroquad::prelude::Vec3;
 use std::collections::HashMap;
@@ -131,6 +131,9 @@ impl Audio {
             ("rifle", shot(0.38, 15.0, 0.42, 130.0, 3)),
             ("sniper", shot(1.0, 5.5, 0.26, 75.0, 4)),
             ("lmg", shot(0.32, 17.0, 0.36, 105.0, 5)),
+            ("shotgun", shot(0.5, 10.0, 0.3, 80.0, 6)),
+            // Fusil à pompe : la détonation, puis la pompe tirée et repoussée.
+            ("pump", mix(shot(0.62, 8.5, 0.28, 70.0, 7), clicks(0.62, &[0.3, 0.33, 0.5, 0.52], 8))),
             ("knife", thud(0.16, 0.5, 26.0, 1.2, 6)),
             ("mag_out", clicks(0.16, &[0.0, 0.05], 7)),
             ("mag_in", clicks(0.14, &[0.0, 0.015, 0.03], 12)),
@@ -191,14 +194,16 @@ impl Audio {
         self.play(name, vol * k * k);
     }
 
-    pub fn shot_name(class: Class) -> &'static str {
-        match class {
+    pub fn shot_name(def: &WeaponDef) -> &'static str {
+        match def.class {
             Class::Knife => "knife",
             Class::Pistol => "pistol",
             Class::Smg => "smg",
             Class::Rifle => "rifle",
             Class::Sniper => "sniper",
             Class::Lmg => "lmg",
+            Class::Shotgun if def.auto => "shotgun",
+            Class::Shotgun => "pump",
         }
     }
 }

@@ -12,7 +12,7 @@ use cesi_common::map::{self, MapInfo};
 use cesi_common::physics::{self, eye_height, Body, MoveInput, BASE_SPEED};
 use cesi_common::protocol::*;
 use cesi_common::voxel::{block_color, World};
-use cesi_common::weapons::{weapon, Class, WeaponDef, KNIFE, KNIFE_COOLDOWN, KNIFE_HEAVY_COOLDOWN, KNIFE_RANGE, PICKUP_RANGE};
+use cesi_common::weapons::{pellet_dirs, weapon, Class, WeaponDef, KNIFE, KNIFE_COOLDOWN, KNIFE_HEAVY_COOLDOWN, KNIFE_RANGE, PICKUP_RANGE};
 use cesi_common::{angle_diff, dir_from_angles, hdist, perturb, Rng};
 use macroquad::prelude::*;
 use std::collections::{HashMap, VecDeque};
@@ -23,7 +23,7 @@ const INTERP: f64 = 0.1;
 /// Le recul revient au plus tard après ce délai (s) : sans cette limite, une arme
 /// lente (fusil de précision) gardait la vue relevée près de 2 s, puis la vue
 /// redescendait toute seule pendant qu'on visait de nouveau à la lunette.
-const RECOIL_HOLD_MAX: f32 = 0.25;
+const RECOIL_HOLD_MAX: f32 = 0.35;
 /// Vitesse du retour du recul (par seconde).
 const RECOIL_RETURN: f32 = 9.0;
 
@@ -563,14 +563,23 @@ impl Game {
             }
             ServerMsg::Shot { shooter, weapon: wid, origin, end, hit_player } => {
                 self.puppets.entry(shooter).or_default().shot = 1.0;
-                audio.play_at(Audio::shot_name(weapon(wid).class), self.cam_pos, origin, 75.0, 0.9);
+                audio.play_at(Audio::shot_name(weapon(wid)), self.cam_pos, origin, 75.0, 0.9);
                 if wid != KNIFE {
                     let d = (end - origin).normalize_or_zero();
-                    self.tracers.push(Tracer { from: origin + d * 0.9 - Vec3::Y * 0.1, to: end, life: 0.07 });
-                    if hit_player {
-                        self.burst(end, -d, 6, 2.0, 0.05, Color::new(0.7, 0.05, 0.05, 1.0));
-                    } else {
-                        self.impact(end, d);
+                    // Fusil à pompe : les autres plombs suivent le même motif autour du tir central.
+                    for (k, p) in pellet_dirs(d, weapon(wid)).enumerate() {
+                        let (to, blood, wall) = if k == 0 {
+                            (end, hit_player, true)
+                        } else {
+                            let h = self.world.raycast(origin, p, 250.0);
+                            (origin + p * h.as_ref().map_or(250.0, |h| h.dist), false, h.is_some())
+                        };
+                        self.tracers.push(Tracer { from: origin + p * 0.9 - Vec3::Y * 0.1, to, life: 0.07 });
+                        if blood {
+                            self.burst(to, -p, 6, 2.0, 0.05, Color::new(0.7, 0.05, 0.05, 1.0));
+                        } else if wall {
+                            self.impact(to, p);
+                        }
                     }
                 }
             }
@@ -848,7 +857,7 @@ impl Game {
             return;
         }
         self.va.fired(&mut self.rng);
-        audio.play(Audio::shot_name(def.class), 0.8);
+        audio.play(Audio::shot_name(def), 0.8);
         // Douille éjectée sur la droite.
         let vb = render::view_basis(origin, yaw, pitch);
         let (right, up, fwd) = (vb.x_axis.truncate(), vb.y_axis.truncate(), vb.z_axis.truncate());
@@ -862,13 +871,15 @@ impl Game {
         self.ammo[self.slot].mag -= 1;
         self.fire_cd = 60.0 / def.rpm;
         self.muzzle_t = 0.05;
-        // Effets locaux immédiats ; le serveur décide des dégâts.
-        let hit = self.world.raycast(origin, dir, 250.0);
-        let end = origin + dir * hit.as_ref().map_or(250.0, |h| h.dist);
+        // Effets locaux immédiats (un trait par plomb) ; le serveur décide des dégâts.
         let m = render::view_basis(origin, yaw, pitch);
-        self.tracers.push(Tracer { from: m.transform_point3(vec3(0.06, -0.07, 0.5)), to: end, life: 0.06 });
-        if hit.is_some() {
-            self.impact(end, dir);
+        for d in pellet_dirs(dir, def) {
+            let hit = self.world.raycast(origin, d, 250.0);
+            let end = origin + d * hit.as_ref().map_or(250.0, |h| h.dist);
+            self.tracers.push(Tracer { from: m.transform_point3(vec3(0.06, -0.07, 0.5)), to: end, life: 0.06 });
+            if hit.is_some() {
+                self.impact(end, d);
+            }
         }
         // Recul : montée sur les premières balles, puis balancement latéral.
         let n = self.spray;

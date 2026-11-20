@@ -1224,7 +1224,7 @@ impl Server {
             } else {
                 None
             };
-            let tiers: [&[u8]; 3] = [&[7, 8], &[9, 6], &[5, 4, 10]];
+            let tiers: [&[u8]; 3] = [&[7, 8], &[9, 6, 14], &[5, 4, 10, 13]];
             let pick = special.or_else(|| {
                 tiers.iter().find_map(|tier| {
                     let opts: Vec<u8> = tier.iter().copied().filter(|w| weapon(*w).price <= money).collect();
@@ -1320,39 +1320,58 @@ impl Server {
 
     // ------------------------------------------------------------------ combat
 
-    fn apply_shot(&mut self, shooter: usize, origin: Vec3, dir: Vec3, wid: u8, rewind: f64, power: f32) {
+    pub(crate) fn apply_shot(&mut self, shooter: usize, origin: Vec3, dir: Vec3, wid: u8, rewind: f64, power: f32) {
         let def = weapon(wid);
         let range = if wid == KNIFE { KNIFE_RANGE } else { 250.0 };
-        let wall = self.world.raycast(origin, dir, range).map_or(range, |h| h.dist);
         let team = self.players[shooter].team;
-        let mut best: Option<(usize, f32, u8)> = None;
-        for (i, p) in self.players.iter().enumerate() {
-            if i == shooter || !p.alive || p.team == team {
-                continue;
+        // Chaque plomb (une seule balle pour la plupart des armes) suit son propre trajet ;
+        // les dégâts sont additionnés par joueur touché et par partie du corps.
+        let mut hits: Vec<(usize, u8, f32, Vec3)> = Vec::new();
+        let (mut center, mut center_hit) = (origin, false);
+        for (k, d) in pellet_dirs(dir, def).enumerate() {
+            let wall = self.world.raycast(origin, d, range).map_or(range, |h| h.dist);
+            let mut best: Option<(usize, f32, u8)> = None;
+            for (i, p) in self.players.iter().enumerate() {
+                if i == shooter || !p.alive || p.team == team {
+                    continue;
+                }
+                let (pos, crouch) = p.pos_at(rewind);
+                if let Some((t, group)) = ray_player(origin, d, pos, crouch) {
+                    if t < wall && best.map_or(true, |b| t < b.1) {
+                        best = Some((i, t, group));
+                    }
+                }
             }
-            let (pos, crouch) = p.pos_at(rewind);
-            if let Some((t, group)) = ray_player(origin, dir, pos, crouch) {
-                if t < wall && best.map_or(true, |b| t < b.1) {
-                    best = Some((i, t, group));
+            let end = origin + d * best.map_or(wall, |b| b.1);
+            if k == 0 {
+                (center, center_hit) = (end, best.is_some());
+            }
+            if let Some((victim, dist, group)) = best {
+                let mult = match group {
+                    0 => def.head_mult,
+                    1 => 1.0,
+                    _ => 0.75,
+                };
+                let dmg = def.damage * def.range_mod.powf(dist / 12.0) * mult * power;
+                match hits.iter_mut().find(|h| h.0 == victim && h.1 == group) {
+                    Some(h) => h.2 += dmg,
+                    None => hits.push((victim, group, dmg, end)),
                 }
             }
         }
-        let end = origin + dir * best.map_or(wall, |b| b.1);
         let (sid, bot) = (self.players[shooter].id, self.players[shooter].is_bot);
-        let msg = ServerMsg::Shot { shooter: sid, weapon: wid, origin, end, hit_player: best.is_some() };
+        let msg = ServerMsg::Shot { shooter: sid, weapon: wid, origin, end: center, hit_player: center_hit };
         if bot {
             self.broadcast(msg);
         } else {
             self.broadcast_except(sid, msg);
         }
-        if let Some((victim, dist, group)) = best {
-            let mult = match group {
-                0 => def.head_mult,
-                1 => 1.0,
-                _ => 0.75,
-            };
-            let dmg = def.damage * def.range_mod.powf(dist / 12.0) * mult * power;
-            self.damage(victim, Some(shooter), dmg, def.armor_pen, group, wid, end);
+        // La tête d'abord : une élimination par un plomb à la tête compte comme telle.
+        hits.sort_by_key(|h| h.1);
+        for (victim, group, dmg, pos) in hits {
+            if self.players[victim].alive {
+                self.damage(victim, Some(shooter), dmg, def.armor_pen, group, wid, pos);
+            }
         }
     }
 

@@ -395,6 +395,7 @@ impl Bot {
         let engage = match def.class {
             Class::Pistol => 16.0,
             Class::Smg => 20.0,
+            Class::Shotgun => 9.0,
             Class::Sniper => 90.0,
             _ => 38.0,
         };

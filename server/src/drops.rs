@@ -345,6 +345,40 @@ mod tests {
         assert_eq!(s.players[0].pos, start);
     }
 
+    /// Tir du joueur 0 sur un adversaire équipé (gilet et casque) placé à `dist` m,
+    /// dans une direction dégagée ; renvoie les points de vie perdus.
+    fn shotgun_damage(wid: u8, dist: f32) -> i32 {
+        let mut s = server();
+        let mut v = Player::new(2, "Cible".into(), Team::CT, 800, None);
+        (v.alive, v.health, v.armor, v.helmet) = (true, 100, 100, true);
+        s.players.push(v);
+        let feet = s.players[0].pos;
+        let eye = feet + Vec3::Y * 1.6;
+        let dir = (0..16)
+            .map(|k| Vec3::new((k as f32 * 0.39).cos(), 0.0, (k as f32 * 0.39).sin()))
+            .find(|d| s.world.raycast(eye, *d, 30.0).is_none() && s.world.raycast(feet + Vec3::Y * 0.3, *d, 30.0).is_none())
+            .expect("une direction dégagée");
+        s.players[1].pos = feet + dir * dist;
+        let aim = (s.players[1].pos + Vec3::Y * 1.1 - eye).normalize();
+        let t = s.time;
+        s.apply_shot(0, eye, aim, wid, t, 1.0);
+        100 - s.players[1].health.max(0)
+    }
+
+    #[test]
+    fn shotguns_are_deadly_up_close_and_weak_at_range() {
+        // Le Sanglier tue d'un coup à bout portant, même un adversaire protégé.
+        assert_eq!(shotgun_damage(13, 4.0), 100);
+        // L'Ouragan a besoin de deux cartouches, mais il tire trois fois plus vite.
+        let close = shotgun_damage(14, 4.0);
+        assert!((50..100).contains(&close), "{}", close);
+        // À 25 m, les plombs s'éparpillent et ne font presque plus rien.
+        for wid in [13, 14] {
+            let far = shotgun_damage(wid, 25.0);
+            assert!(far < 25, "{} : {} dégâts à 25 m", wid, far);
+        }
+    }
+
     #[test]
     fn exchange_leaves_the_old_weapon_with_its_ammo() {
         let mut s = server();

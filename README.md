@@ -45,8 +45,23 @@ poids, affiché avec la vitesse au survol dans le menu d'achat :
 | Pistolets | 0,7 à 2 kg | 98 à 92 % |
 | Pistolets-mitrailleurs | 2,5 à 3,4 kg | 90 à 86 % |
 | Fusils d'assaut, Éclaireur | 3 à 3,9 kg | 88 à 84 % |
+| Fusils à pompe | 3,6 à 4 kg | 85 à 83 % |
 | Léviathan | 6,5 kg | 72 % |
 | Mammouth | 8 kg | 65 % |
+
+## Fusils à pompe
+
+Chaque cartouche tire une gerbe de plombs, toujours selon le même motif : un
+plomb au centre du viseur, les autres répartis en cercle autour. Les dégâts de
+chaque plomb s'additionnent, très forts de près et presque nuls au-delà de
+20 m.
+
+| Arme | Prix | Tir | Plombs | Contre un adversaire avec gilet et casque |
+| --- | --- | --- | --- | --- |
+| Sanglier | 900 $ | à pompe, 68 coups/min, 6 cartouches | 9 × 26 | tue d'un coup jusqu'à 6 m |
+| Ouragan | 2000 $ | automatique, 200 coups/min, 7 cartouches | 7 × 20 | deux coups jusqu'à 10 m |
+
+Le Sanglier rapporte 900 $ par élimination, l'Ouragan 600 $.
 
 ## Cartes
 

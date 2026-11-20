@@ -182,6 +182,7 @@ pub fn draw(g: &Game, b: &mut Batch, eye: Vec3, yaw: f32, pitch: f32) {
         Class::Smg => (vec3(0.16, -0.18, 0.44), 0.035, 0.05),
         Class::Rifle => (vec3(0.16, -0.19, 0.4), 0.045, 0.06),
         Class::Sniper => (vec3(0.16, -0.19, 0.38), 0.1, 0.12),
+        Class::Shotgun => (vec3(0.16, -0.19, 0.4), 0.09, 0.15),
         _ => (vec3(0.17, -0.21, 0.4), 0.04, 0.05),
     };
 
@@ -210,6 +211,18 @@ pub fn draw(g: &Game, b: &mut Batch, eye: Vec3, yaw: f32, pitch: f32) {
         rx -= 0.07 * w;
         off.y -= 0.025 * w;
     }
+    // Fusil à pompe : la main gauche tire la pompe puis la repousse entre deux tirs.
+    let mut pump = 0.0;
+    if def.class == Class::Shotgun && !def.auto && g.reload_t <= 0.0 && g.fire_cd > 0.0 {
+        let u = 1.0 - g.fire_cd / (60.0 / def.rpm);
+        pump = ss(0.22, 0.4, u) * (1.0 - ss(0.52, 0.72, u));
+        slide = slide.max(pump);
+        rx -= 0.05 * pump;
+        off.z -= 0.015 * pump;
+    }
+    if def.class == Class::Shotgun && def.auto {
+        slide = slide.max(k);
+    }
     if def.class == Class::Pistol {
         slide = slide.max(k);
         // Chargeur vide : la culasse reste en arrière.
@@ -229,7 +242,7 @@ pub fn draw(g: &Game, b: &mut Batch, eye: Vec3, yaw: f32, pitch: f32) {
     // Main gauche : sur le garde-main, puis elle accompagne le chargeur et arme la culasse.
     let mag = if id == 6 { vec3(rp.mag.x, -rp.mag.y, rp.mag.z) } else { rp.mag };
     let rack = gr.rack + vec3(-0.02, 0.0, -0.06 * rp.slide);
-    let lp = (gr.fore.lerp(gr.mag + mag, rp.follow) + vec3(-0.14, -0.3, -0.12) * rp.away).lerp(rack, rp.rack);
+    let lp = (gr.fore.lerp(gr.mag + mag, rp.follow) + vec3(-0.14, -0.3, -0.12) * rp.away).lerp(rack, rp.rack) - vec3(0.0, 0.0, 0.09 * pump);
     b.cube(&vm, lp - vec3(0.032, 0.03, 0.04), lp + vec3(0.032, 0.035, 0.04), SKIN);
     limb(b, vm.transform_point3(lp + vec3(-0.01, -0.03, -0.02)), view.transform_point3(vec3(-0.2, -0.58, 0.22)), side, w, sleeve);
 
