@@ -20,6 +20,12 @@ use std::rc::Rc;
 
 /// Retard d'affichage des autres joueurs (interpolation entre deux photos).
 const INTERP: f64 = 0.1;
+/// Le recul revient au plus tard après ce délai (s) : sans cette limite, une arme
+/// lente (fusil de précision) gardait la vue relevée près de 2 s, puis la vue
+/// redescendait toute seule pendant qu'on visait de nouveau à la lunette.
+const RECOIL_HOLD_MAX: f32 = 0.25;
+/// Vitesse du retour du recul (par seconde).
+const RECOIL_RETURN: f32 = 9.0;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum Overlay {
@@ -201,6 +207,12 @@ pub struct Game {
     pub rng: Rng,
 }
 
+/// Délai après un tir avant que le recul ne revienne : un peu plus que l'intervalle
+/// entre deux tirs, pour qu'une rafale continue de monter, sans dépasser `RECOIL_HOLD_MAX`.
+fn recoil_hold(def: &WeaponDef) -> f32 {
+    (60.0 / def.rpm * 1.4).min(RECOIL_HOLD_MAX)
+}
+
 fn fovy_from(fov: f32) -> f32 {
     2.0 * ((fov.to_radians() / 2.0).tan() * 0.75).atan()
 }
@@ -219,7 +231,22 @@ fn wheel_next(has: [bool; 2], owned: &[usize], cur: (usize, usize), forward: boo
 
 #[cfg(test)]
 mod tests {
-    use super::wheel_next;
+    use super::{recoil_hold, wheel_next, RECOIL_RETURN};
+    use cesi_common::weapons::WEAPONS;
+
+    #[test]
+    fn scoped_rifles_recover_their_recoil_before_the_scope_is_back() {
+        for d in WEAPONS.iter().filter(|d| d.scope) {
+            // Temps pour que le recul retombe sous 1 % de sa valeur.
+            let settled = recoil_hold(d) + (100.0f32).ln() / RECOIL_RETURN;
+            let rescope = 60.0 / d.rpm * 0.85;
+            assert!(settled < rescope, "{} : recul stabilisé à {settled:.2} s, lunette à {rescope:.2} s", d.name);
+        }
+        // Les armes automatiques gardent la montée en rafale : pas de retour entre deux balles.
+        for d in WEAPONS.iter().filter(|d| d.auto && d.rpm > 0.0 && d.mag > 0) {
+            assert!(recoil_hold(d) > 60.0 / d.rpm, "{}", d.name);
+        }
+    }
 
     #[test]
     fn wheel_goes_through_every_grenade_type() {
@@ -1192,9 +1219,9 @@ impl Game {
                 }
             }
             // Retour du recul une fois la rafale terminée.
-            if self.now - self.last_shot > (60.0 / def.rpm * 1.4) as f64 {
+            if self.now - self.last_shot > recoil_hold(def) as f64 {
                 self.spray = (self.spray - dt * 12.0).max(0.0);
-                self.recoil *= (-9.0 * dt).exp();
+                self.recoil *= (-RECOIL_RETURN * dt).exp();
             }
             let (yaw, pitch) = self.view_angles();
             // Léger balancement de la caméra à chaque pas.
